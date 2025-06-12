@@ -9,31 +9,36 @@ from pathlib import Path
 import random
 from collections import Counter
 
-from pygments import highlight
+# pygments is not a standard dependency for this script's core logic,
+# but keeping it in imports if it was intended for future use.
+# from pygments import highlight 
 import yaml
 
 """
-动态个性化面向对象课程数据分析脚本 V8.6 (语料增强版)
+动态个性化面向对象课程数据分析脚本 V8.7
 
 功能:
-1.  [V8.6 优化] 优化语料库，对部分语句进行扩写与润色，引入更多变量，报告更具个性化与生动性。
-2.  [V8.5 新增] 新增互测博弈过程分析，洞察Hack时机（闪电战/偷塔）、目标选择（集火/广撒网）等高级策略。
-3.  [V8.5 新增] 引入基于同房间数据的相对表现分析，新增“风暴幸存者”、“精准打击者”、“战术大师”等情景化标签。
-4.  解析包含课程作业API数据的JSON文件。
-5.  [V8.0 功能] 新增“王者归来”、“漏洞修复专家”等亮点标签，深度挖掘成长与责任感。
-6.  [V8.0 功能] 新增性能瓶颈（RTLE/CTLE）专项分析，尤其关注第二单元并发挑战。
-7.  [V8.0 功能] 全面启用并优化语料库，生成关于稳定性、攻防风格的深度文字分析，报告更具洞察力。
-8.  [V7.0 功能] 引入学生画像系统 (防御者/攻击者/改进者/DDL战神)，生成高度个性化报告。
-9.  [V7.0 功能] 深度挖掘Bug修复数据，分析Bug修复率、攻防得分比，评估开发者责任感。
-10. [V7.0 功能] 详细解析第四单元UML模型检查点，提供针对性反馈。
-11. [V7.0 功能] 整合核心图表为2x2的“综合表现仪表盘”，信息更集中。
-12. 深度分析攻防策略演化、提交行为与代码质量的关联。
-13. 引入基于房间等级的加权防御分，更科学地评估鲁棒性。
-14. 使用大型语料库，生成每次都不同的、充满洞察与个性的分析报告。
-15. 生成多维度、信息丰富的可视化图表。
+1.  [V8.7 新增] 全面增强同理心语料库，为成绩不理想或在C房挣扎的同学提供鼓励性、建设性反馈。
+2.  [V8.7 新增] 引入新的学生画像与亮点标签（如“坚实奠基者”），认可学习过程中的毅力与坚持。
+3.  [V8.7 优化] 优化相对表现分析，能区分解读A房、C房和混合房间的不同挑战与收获。
+4.  [V8.6 优化] 优化语料库，对部分语句进行扩写与润色，引入更多变量，报告更具个性化与生动性。
+5.  [V8.5 新增] 新增互测博弈过程分析，洞察Hack时机、目标选择等高级策略。
+6.  [V8.5 新增] 引入基于同房间数据的相对表现分析，新增“风暴幸存者”、“精准打击者”、“战术大师”等情景化标签。
+7.  解析包含课程作业API数据的JSON文件。
+8.  [V8.0 功能] 新增“王者归来”、“漏洞修复专家”等亮点标签，深度挖掘成长与责任感。
+9.  [V8.0 功能] 新增性能瓶颈（RTLE/CTLE）专项分析，尤其关注第二单元并发挑战。
+10. [V8.0 功能] 全面启用并优化语料库，生成关于稳定性、攻防风格的深度文字分析，报告更具洞察力。
+11. [V7.0 功能] 引入学生画像系统 (防御者/攻击者/改进者/DDL战神)，生成高度个性化报告。
+12. [V7.0 功能] 深度挖掘Bug修复数据，分析Bug修复率、攻防得分比，评估开发者责任感。
+13. [V7.0 功能] 详细解析第四单元UML模型检查点，提供针对性反馈。
+14. [V7.0 功能] 整合核心图表为2x2的“综合表现仪表盘”，信息更集中。
+15. 深度分析攻防策略演化、提交行为与代码质量的关联。
+16. 引入基于房间等级的加权防御分，更科学地评估鲁棒性。
+17. 使用大型语料库，生成每次都不同的、充满洞察与个性的分析报告。
+18. 生成多维度、信息丰富的可视化图表。
 
 如何使用:
-1.  将你的JSON数据文件（如 result1.txt 或本例中的 tmp.json）与此脚本放在同一目录。
+1.  将你的JSON数据文件（如 result1.txt 或本例中的 test.json）与此脚本放在同一目录。
 2.  创建一个名为 `config.yml` 的文件，并在其中写入你的学号，格式如下:
     stu_id: 23371265
 3.  确保已安装所需库: pip install pandas matplotlib numpy pyyaml
@@ -42,7 +47,7 @@ import yaml
 
 # --- 1. 配置区 ---
 CONFIG = {
-    "FILE_PATH": "tmp.json",
+    "FILE_PATH": "tmp.json", # 默认使用您提供的文件名
     "YAML_CONFIG_PATH": "config.yml",
     "USER_INFO": {
         "real_name": None,
@@ -67,14 +72,15 @@ plt.rcParams['font.sans-serif'] = CONFIG["FONT_FAMILY"]
 plt.rcParams['axes.unicode_minus'] = False
 
 
-# --- 2. 语料库 (Corpus) V8.6 优化版 ---
+# --- 2. 语料库 (Corpus) V8.7 优化版 ---
 class ReportCorpus:
     PERSONA_ANALYSIS = {
         "FORTRESS": "你好，{user_name}！欢迎查阅你的OO学习纪实。数据显示，你如同一位‘稳健防御者’，代码质量坚如磐石，在风浪中始终保持着卓越的稳定性。让我们一同回顾这段构筑代码堡垒的旅程。",
         "HUNTER": "你好，{user_name}！这份报告将带你重温OO课程中的高光时刻。你的数据画像显示出一位‘敏锐攻击者’的特质，总能洞察他人代码的微妙之处。让我们看看这位‘猎人’的辉煌战绩。",
         "GRINDER": "欢迎查阅你的OO学习纪实，{user_name}。数据显示，你是一位典型的‘迭代改进者’，通过不懈的努力和反复打磨，实现了技术的持续跃迁。汗水浇灌的花朵，格外鲜艳。",
         "SPRINTER": "你好，{user_name}！欢迎来到你的OO时间胶囊。数据显示，你是一位出色的‘DDL战神’，擅长在压力之下爆发出惊人的效率和创造力。让我们一同回顾那些在deadline前完成的华丽冲刺。",
-        "BALANCED": "你好，{user_name}！这份报告将带你穿越时空，回顾你在OO课程中的一段非凡旅程。数据显示你是一位攻防均衡、稳扎稳打的‘全能型选手’。让我们一起揭开数据的面纱，看看汗水与代码交织出的成长画卷。"
+        "BALANCED": "你好，{user_name}！这份报告将带你穿越时空，回顾你在OO课程中的一段非凡旅程。数据显示你是一位攻防均衡、稳扎稳打的‘全能型选手’。让我们一起揭开数据的面纱，看看汗水与代码交织出的成长画卷。",
+        "BALANCED_GENTLE": "你好，{user_name}！欢迎查阅你的OO学习纪实。这份报告旨在与你一同回顾这段充满挑战与收获的旅程。分数仅仅是衡量维度之一，让我们一起发掘数据背后，你作为一名学习者的坚韧与成长。" # [V8.7 新增]
     }
     BUG_FIX_ANALYSIS = {
         "HIGH_FIX_RATE": "在Bug修复阶段，你的表现堪称典范。对于被发现的 {total_bugs} 个bug，你成功修复了 {fixed_bugs} 个，修复率高达 {rate:.1f}%。这体现了你作为开发者的责任心与强大的调试纠错能力。",
@@ -84,16 +90,16 @@ class ReportCorpus:
         "NO_BUGS_TO_FIX": "在整个学期的Bug修复环节，你的代码未曾被发现任何可修复的bug，这是一个了不起的成就！"
     }
     UML_ANALYSIS = {
-        "PERFECT": [ # [V8.6 扩写]
+        "PERFECT": [
             "  - UML模型解析: 完美通过所有检查点，展现了你对类图、状态图和顺序图的深刻理解。",
             "  - UML模型解析: 你的UML解析器表现堪称完美，精确无误地解读了所有模型，所有检查点均顺利通过。",
         ],
-        "IMPERFECT": [ # [V8.6 扩写]
+        "IMPERFECT": [
             "  - UML模型解析: 在以下检查点遇到挑战：{issues}。这通常是模型间关联的难点，也是深入理解UML的绝佳机会。",
             "  - UML模型解析: 在解析中，以下部分需要关注：{issues}。这些复杂的交互点正是UML学习的核心，攻克它们意味着更大的进步。",
         ]
     }
-    HIGHLIGHTS_INTRO = [ # [V8.6 扩写]
+    HIGHLIGHTS_INTRO = [
         "基于你的学期数据，我们为你提炼了以下几个闪亮的个人标签：",
         "数据不会说谎，它们为你描绘了一幅独特的开发者画像。以下是为你专属定制的亮点标签：",
         "在海量的代码与提交记录中，我们捕捉到了你独有的闪光点。请看你的高光时刻集锦：",
@@ -113,25 +119,30 @@ class ReportCorpus:
         "DEADLINE_COMEBACK": "  - ⏰ DDL逆袭者: 在「{hw_name}」等任务中，你数次在最终时刻力挽狂澜，提交的代码依然取得了优良成绩，展现了非凡的抗压能力。",
 
         # --- 成长/态度型 (普适性更强) ---
-        "COMEBACK_KING": "  - 📈 王者归来: 从学期初的{u1_score:.1f}分到学期末的{u4_score:.1f}分，你的平均分实现了显著提升，展现了惊人的学习能力和后劲。", # [V8.6 优化] 增加具体分数
+        "COMEBACK_KING": "  - 📈 王者归来: 从学期初的{u1_score:.1f}分到学期末的{u4_score:.1f}分，你的平均分实现了显著提升，展现了惊人的学习能力和后劲。",
         "REFACTOR_VIRTUOSO": "  - 🏗️ 架构迭代大师: 在「{unit_name}」中，你通过果断的迭代，实现了从「{hw_name_before}」到「{hw_name_after}」的飞跃，展现了卓越的架构演进能力。",
         "BUG_FIXER_PRO": "  - 🔧 漏洞修复专家: 对于学期中被发现的所有Bug，你都成功修复，体现了极致的开发者责任感。",
         "PERFORMANCE_CHALLENGER": "  - 💨 并发挑战者: 你在第二单元虽然遇到了性能挑战，但最终成功克服，展现了强大的调试和优化能力。",
         "THE_PERSEVERER": "  - 🌱 坚韧不拔: 即使在「{low_score_hw}」遇到挫折，你依然坚持不懈，并在「{rebound_hw}」中取得了显著进步，这份毅力比分数更宝贵！",
         "DILIGENT_EXPLORER": "  - 🧗 勤奋的探索者: 本学期你累计提交了 {total_submissions} 次代码。每一次提交都是一次宝贵的探索，记录了你攀登技术高峰的足迹。",
         "ACTIVE_COLLABORATOR": "  - 🤝 积极的协作者: 在「{hw_name}」的互测中，你发起了 {hack_attempts} 次测试，积极参与到社区协作中。发现他人bug与修复自身bug同样是学习的重要一环。",
+        "FOUNDATION_BUILDER": "  - 🧱 坚实奠基者: 你坚持完成了本学期的每一次作业，即使面对「{hw_name}」这样的挑战也未曾放弃。每一次提交都是在为未来的技术大厦添砖加瓦，这份坚持难能可贵。", # [V8.7 新增]
         
         # --- V8.5 新增：博弈/情景化标签 ---
         "PRECISION_STRIKER": "  - 🎯 精准打击者: 在「{hw_name}」中，你的Hack成功率高达{rate:.0f}%，展现了你构造高效测试用例的非凡能力。",
         "TACTICAL_MASTER": "  - ♟️ 战术大师: 你在「{hw_name}」的互测中展现了清晰的战术思路，集中火力成功攻破了{target_count}名同学的防线。",
-        "STORM_SURVIVOR": "  - 🌊 风暴幸存者: 在「{hw_name}」这场被Hack总数高达{room_total_hacked}次的“腥风血雨”中，你仅被攻破{self_hacked}次，展现了超凡的生存能力。"
+        "STORM_SURVIVOR": "  - 🌊 风暴幸存者: 在「{hw_name}」这场被Hack总数高达{room_total_hacked}次的“腥风血雨”中，你仅被攻破{self_hacked}次，展现了超凡的生存能力。",
+
+        # ----V9.0 new
+        "IRON_WALL_SQUAD": "  - 🏅 铁壁小队成员: 你所在的「{hw_name}」A房上演了史诗级的防御战！在全房超过 {total_attacks} 次的密集火力下，无一人被攻破。作为这支‘铁壁小队’的一员，你的代码与其他成员共同铸就了这道无法逾越的防线，这份集体荣誉含金量极高！",
+        "PLANNING_MASTER": "  - 🎓 规划大师: 在「{hw_name}」中，你不仅在截止前数日就完成了首次提交，并且仅用 {count} 次提交就产出了强测满分、互测零失误的完美代码。这展现了你对需求的深刻理解、清晰的架构设计和卓越的规划能力，堪称‘一次成型’的典范。",
     }
     HIGHLIGHTS_CATEGORIES = {
-        # ... (no changes needed here)
         "TOP_SCORER": "卓越表现", "ROCK_SOLID": "卓越表现", "DEFENSE_MASTER": "卓越表现", "JML_MASTER": "卓越表现", "UML_EXPERT": "卓越表现", "STORM_SURVIVOR": "卓越表现",
         "EFFICIENCY_ACE": "高效策略", "FAST_STARTER": "高效策略", "DEADLINE_COMEBACK": "高效策略",
-        "COMEBACK_KING": "成长态度", "REFACTOR_VIRTUOSO": "成长态度", "BUG_FIXER_PRO": "成长态度", "PERFORMANCE_CHALLENGER": "成长态度", "THE_PERSEVERER": "成长态度", "DILIGENT_EXPLORER": "成长态度", "ACTIVE_COLLABORATOR": "成长态度",
-        "HACK_ARTIST": "博弈高手", "PRECISION_STRIKER": "博弈高手", "TACTICAL_MASTER": "博弈高手",
+        "COMEBACK_KING": "成长态度", "REFACTOR_VIRTUOSO": "成长态度", "BUG_FIXER_PRO": "成长态度", "PERFORMANCE_CHALLENGER": "成长态度", "THE_PERSEVERER": "成长态度", "DILIGENT_EXPLORER": "成长态度", "ACTIVE_COLLABORATOR": "成长态度", "FOUNDATION_BUILDER": "成长态度",
+        "HACK_ARTIST": "博弈高手", "PRECISION_STRIKER": "博弈高手", "TACTICAL_MASTER": "博弈高手","IRON_WALL_SQUAD": "卓越表现",
+        "PLANNING_MASTER": "高效策略",
     }
     DDL_ANALYSIS = [
         "数据显示，当你的「DDL指数」较高时，代码出现问题的风险似乎有所增加。这提示我们，对于复杂任务，预留更充足的测试时间可能效果更佳",
@@ -169,6 +180,11 @@ class ReportCorpus:
         "强测的试金石不仅检验代码，更在{hw_names}处雕琢出你思维的新棱角",
         "强测曲线上的微小波动，在{hw_names}处激起最绚烂的成长涟漪"
     ]
+    STRONG_TEST_STRUGGLE = [ # [V8.7 新增]
+        "OO课程本身就充满挑战，分数并不能定义你的全部努力。数据显示，即使在「{hw_names}」等作业上遇到困难，你依然坚持完成了所有任务，这份毅力和面对挑战的勇气是未来职业生涯中更宝贵的财富。",
+        "在「{hw_names}」上的经历，虽然充满挑战，但它们是你学习路上不可或缺的一部分。每一次调试、每一次重构，都是在为更深层次的理解铺路。请相信，这些奋斗的时光终将成就一个更强大的你。",
+        "强测成绩记录了你的学习轨迹。对于「{hw_names}」中遇到的难点，不妨将其视为一个明确的信号，指引你回顾和巩固相关的知识点。发现薄弱环节，是进步的开始。"
+    ]
     PERFORMANCE_ISSUE = [
         "特别是在处理 {hw_names} 时遇到的性能问题（{issue_types}），是你从「能用」到「好用」的进阶之战",
         "RTLE/CTLE 是每个优秀程序员都会遇到的拦路虎，你成功驯服了它，这标志着你对算法复杂度的理解迈上了新台阶",
@@ -187,6 +203,11 @@ class ReportCorpus:
         "{variance:.2f}的方差数据背后，是异常处理机制与算法实现的双重零抖动保障体系",
         "你的成绩轨迹如同镭射校准线，{variance:.2f}的微小波动区间彰显大师级质量控制能力"
     ]
+    CONSISTENCY_LOW_SCORE_STABLE = [
+        "数据显示，你的成绩稳定在一个特定区间（方差{variance:.2f}）。这通常意味着你可能遇到了一个持续性的挑战或知识瓶颈。这正是寻求突破的绝佳时机，不妨尝试与同学或助教深入交流，或许换一个思路就能豁然开朗。",
+        "你的成绩曲线显示出一种稳定的模式（方差{variance:.2f}）。这可能表明你已经形成了一套固定的解题方法，但它可能无法应对更复杂的情况。这是反思和迭代自己方法论的好机会，勇敢地尝试一些新的架构或思路，可能会带来意想不到的收获。",
+        "注意到你的成绩在一段时期内表现稳定（方差{variance:.2f}），但仍有很大的提升空间。这很可能是某个核心概念或编程习惯限制了你的上限。主动识别并攻克这个‘瓶颈’，你的能力将迎来一次质的飞跃。回顾一下出错较多的测试点，或许能找到线索。"
+    ]
     CONSISTENCY_VOLATILE = [
         "你的成绩曲线充满了动态与激情（方差{variance:.2f}），时而登顶，时而面临挑战。这说明你勇于探索不同的方法，每一次的波谷都是为了下一次的跃升积蓄力量",
         "方差 {variance:.2f} 的数据显示，你的学习之路并非一帆风顺，但这恰恰证明了你的坚韧。从 {worst_hw} 的低谷到 {best_hw} 的高峰，你完成了漂亮的逆袭",
@@ -196,6 +217,29 @@ class ReportCorpus:
         "在{variance:.2f}的波动幅度中，我们看到{worst_hw}的反思如何催化{best_hw}的质变，这是最动人的学习进化论",
         "系统记录到成长型波动模式：{worst_hw}处的调试深蹲只为{best_hw}处的性能腾跃，{variance:.2f}的方差正是你技术弹性的度量衡"
     ]
+
+    # [V9.0 新增]
+    ROOM_ECOLOGY_ANALYSIS = {
+        "PEACE_ROOM": [
+            "在「{hw_name}」中，你所在的房间出现了一种罕见的「和平奇迹」：尽管发生了{total_attacks}次攻击，但整个房间无一人被成功Hack。这表明该次作业的防御难度极高，而你和你的同房对手们都达到了顶尖的防御水准，共同上演了一场教科书式的集体防御",
+            "在{hw_name}的互测战场上，你们创造了{total_attacks}次交锋零伤亡的战争奇迹——这不是因为进攻疲软，而是所有防御者都筑起了绝对防线，如同数字时代的马其诺防线",
+            "系统检测到防御奇观：当{hw_name}的互测房间累计承受{total_attacks}次饱和攻击时，全员防御成功率100%，这场集体免疫风暴重新定义了代码健壮性的上限",
+            "{hw_name}的和平公约：在{total_attacks}次互相试探后，整个房间的异常处理机制如同精密钟表，所有齿轮咬合得天衣无缝，最终交出零漏洞的完美答卷",
+            "这间{hw_name}互测室正在书写历史：{total_attacks}次攻击尝试如雨点般落下，却无人能在这座数字不落要塞上留下裂痕，这是现代编程艺术的巅峰时刻"
+        ]
+    }
+    
+    # [V9.0 新增]
+    MUTUAL_TEST_ATTACK_INSIGHT = {
+        "HIGH_ATTEMPT_LOW_SUCCESS": [
+            "在这次互测中，你表现出了极高的攻击热情，发起了{attempts}次尝试。虽然最终未能成功，但这反映了你积极探索和测试的精神。这也提示我们，未来可以进一步提升测试用例的构造技巧，从「广撒网」向「精准打击」转变，或许能获得更好的效果",
+            "你的{attempts}次攻击冲锋虽未破防，却像暴雨洗礼般锤炼了整个房间的防御体系——每次尝试都在为未来的「致命一击」积累经验值",
+            "系统记录到高能攻击模式：在本次战役中，你以{attempts}次测试用例的火力覆盖，虽未直接命中要害，却成功测绘出敌方防御矩阵的轮廓",
+            "{attempts}次尝试如同黑客版的「万箭齐发」，虽然暂时未能穿透防御，但这份探索精神终将淬炼出见血封喉的漏洞之箭",
+            "攻击数据解码：你的{attempts}次出剑轨迹，正在编织一张无形的测试用例神经网络，终将在某个临界点爆发识破所有防御模式的洞察力"
+        ]
+    }
+
     MUTUAL_TEST_DEFENSIVE = [
         "你的代码仿佛一座坚固的堡垒，在互测的炮火中屹立不倒，被Hack次数极少。这说明你对边界条件和异常处理有着深刻的理解，防御记录堪称传奇",
         "在互测环节，你的程序表现出了惊人的鲁棒性，让无数「黑客」无功而返。能守住自己的阵地，本身就是一种强大的实力",
@@ -227,15 +271,19 @@ class ReportCorpus:
         "战场遗迹分析：在{total_hacked_attempts}个攻击弹坑中，仅{total_hacked}个突破防线，{rate:.1f}%的防御成功率如同现代马其诺防线般坚不可摧",
         "生存能力认证：基于{total_hacked_attempts}次攻击样本，你的代码在{total_hacked}次危机中展现进化能力，将漏洞率压缩至{rate:.1f}%的绝对安全阈值"
     ]
-    MUTUAL_TEST_RELATIVE_PERFORMANCE = [
-        "值得一提的是，你在互测中长期处于高强度的A房（A房率{a_room_rate:.0f}%），并常年在远低于房间平均被Hack次数的水平上保持稳定，防御能力经受住了最严苛的考验",
-        "数据显示，你的A房率高达{a_room_rate:.0f}%。在高水平的竞争环境中，你的代码依然表现稳健，这含金量十足",
-        "精英竞技场报告：{a_room_rate:.0f}%的A房出勤率，配合低于均值{count}个数量级的漏洞率，铸就钻石段位防御力",
-        "在顶级{a_room_rate:.0f}%A房生存率背后，是你在{hw_names}战场淬炼出的反黑客特种作战能力",
-        "系统授予「巅峰挑战者」称号：基于{a_room_rate:.0f}%的A房参与度，你的防御评分超越同房{count}%选手",
-        "当{a_room_rate:.0f}%的代码精英汇聚A房，你的异常处理矩阵仍能保持99.9%的拦截成功率",
-        "这份{a_room_rate:.0f}%的A房通行证，见证你在{term}赛季的{hw_names}中通过地狱级防御试炼"
-    ]
+    MUTUAL_TEST_RELATIVE_PERFORMANCE = { # [V8.7 改造]
+        "A_ROOM": [
+            "值得一提的是，你在互测中长期处于高强度的A房（A房率{a_room_rate:.0f}%），并常年在远低于房间平均被Hack次数的水平上保持稳定，防御能力经受住了最严苛的考验。",
+            "数据显示，你的A房率高达{a_room_rate:.0f}%。在高水平的竞争环境中，你的代码依然表现稳健，这含金量十足。"
+        ],
+        "C_ROOM": [
+            "你在C房中进行了多次历练。C房环境往往更加混乱和不可预测，这为你提供了测试代码在各种极端和意外情况下鲁棒性的绝佳机会。在这样的环境中生存下来，本身就是一种宝贵的经验。",
+            "数据显示你多次在C房进行互测。相比于A/B房的“精妙”bug，C房更能暴露代码在基础稳定性和边界处理上的问题。这段经历对你构建更坚固的代码地基大有裨益。"
+        ],
+        "MIXED": [
+            "你的互测经历覆盖了不同层级的房间，让你体验了多样的攻防生态，从不同角度审视自己的代码，这有助于形成更全面的质量观。"
+        ]
+    }
     BUG_FIX_INSIGHT = [ # [V8.6 扩写]
         "Bug修复阶段的分数是你辛勤付出的最好证明，每一分都凝聚着你的汗水与智慧。",
         "这部分得分，是你作为一名负责任的开发者的勋章。它证明你不仅能发现问题，更能漂亮地解决问题，完成软件开发的闭环。",
@@ -269,16 +317,14 @@ class ReportCorpus:
         "「{hw_name}」的提交次数最少（{count}次），或许是你思路清晰、一气呵成的典范之作。",
         "对于「{hw_name}」，你展现了‘快准狠’的风格，仅用 {count} 次提交便大功告成，这背后是对需求的精准把握和强大的自信。",
     ]
-    HW_ANALYSIS_INTRO = [ # [V8.6 扩写]
+    HW_ANALYSIS_INTRO = [
         "接下来，让我们深入每一次作业的细节，复盘得失，洞见成长。",
         "每一份作业都是一个独特的关卡，下面是你通关每一关的详细战报。",
         "现在，让我们戴上显微镜，逐一剖析每次作业的战斗记录，从中汲取经验，为未来铺路。",
-        "历史是最好的老师。下面，我们将回放你在每次作业中的表现，重温那些挑战与突破的瞬间。",
     ]
-    HACK_STRATEGY_INTRO = [ # [V8.6 扩写]
+    HACK_STRATEGY_INTRO = [
         "你的互测攻击模式，揭示了你作为一名“白帽黑客”的独特风格与战术偏好。",
         "在互测的博弈场上，你不是一个简单的测试者。你的攻击模式，揭示了你的战术思想与独特洞察力。",
-        "每一次成功的Hack都是一次精彩的推理。让我们分析你的攻击数据，看看这位“赏金猎人”的作案手法。",
     ]
     HACK_TIMING_ANALYSIS = {
         "EARLY_BIRD": "你是一位典型的“闪电战”选手，习惯在互测开始后的“黄金一小时”内迅速发起攻势，抢占先机。",
@@ -332,7 +378,7 @@ class ReportCorpus:
     "   真正的工程传奇正在编译中..."
     ]
 
-
+# --- 3. 数据解析与处理 ---
 def find_and_update_user_info(student_id, raw_data, config):
     """
     根据学生ID在原始JSON数据中查找姓名和邮箱，并更新CONFIG。
@@ -376,7 +422,6 @@ def find_and_update_user_info(student_id, raw_data, config):
     print(f"成功识别用户: {user_name} ({student_id})")
     return True
 
-# --- 3. 数据解析与处理 ---
 def get_hw_number(hw_name, config):
     match = re.search(r'第(.*)次作业', hw_name or '')
     return config["HOMEWORK_NUM_MAP"].get(match.group(1), 99) if match else 99
@@ -400,7 +445,11 @@ def parse_course_data(raw_data, config):
         if hw_id not in homework_data: homework_data[hw_id] = {'id': hw_id}
         body_data = item.get("body", {}).get("data", {})
         if not body_data: continue
-        if 'homework' in body_data: homework_data[hw_id].update(body_data['homework'])
+        if 'homework' in body_data: 
+            homework_data[hw_id].update(body_data['homework'])
+            # 确保has_mutual_test字段存在，以便后续分析
+            if 'has_mutual_test' not in homework_data[hw_id]:
+                homework_data[hw_id]['has_mutual_test'] = False
         if 'public_test' in item['url'] and 'public_test' in body_data:
             pt_data = body_data['public_test']
             homework_data[hw_id].update({
@@ -409,11 +458,11 @@ def parse_course_data(raw_data, config):
                 'public_test_end_time': pt_data.get('end_time'),
                 'public_test_last_submit': pt_data.get('last_submit'),
             })
-        # V8.5 新增：解析互测时间
         elif 'mutual_test' in item['url'] and 'room' not in item['url'] and 'data_config' not in item['url'] and 'start_time' in body_data:
             homework_data[hw_id].update({
                 'mutual_test_start_time': body_data.get('start_time'),
                 'mutual_test_end_time': body_data.get('end_time'),
+                'has_mutual_test': True # 确认有互测
             })
         elif 'ultimate_test/submit' in item['url'] and is_target_user(body_data.get('user', {}), config):
             homework_data[hw_id]['strong_test_score'] = body_data.get('score')
@@ -423,17 +472,20 @@ def parse_course_data(raw_data, config):
             if 'uml_results' in body_data and body_data['uml_results']:
                 homework_data[hw_id]['uml_detailed_results'] = body_data['uml_results']
         elif 'mutual_test/room/self' in item['url']:
+            homework_data[hw_id]['has_mutual_test'] = True # 确认有互测
             all_members = body_data.get('members', [])
             all_events = body_data.get('events', [])
-            # V8.5 新增：计算房间整体数据
             room_hacked_counts = [int(m.get('hacked', {}).get('success', 0)) for m in all_members]
             if room_hacked_counts:
                 homework_data[hw_id]['room_total_hacked'] = sum(room_hacked_counts)
                 homework_data[hw_id]['room_avg_hacked'] = np.mean(room_hacked_counts)
+            room_hack_success_counts = [int(m.get('hack', {}).get('success', 0)) for m in all_members]
+            room_hack_total_attempts = [int(m.get('hack', {}).get('total', 0)) for m in all_members]
+            homework_data[hw_id]['room_total_hack_success'] = sum(room_hack_success_counts) # 房间成功Hack总次数
+            homework_data[hw_id]['room_total_hack_attempts'] = sum(room_hack_total_attempts) # 房间总攻击次数
 
             for member in all_members:
                 if is_target_user(member, config):
-                    # V8.5 新增：解析个人博弈数据
                     my_hack_events = [
                         {'time': e['submitted_at'], 'target': e['hacked']['student_id']}
                         for e in all_events if is_target_user(e.get('hack', {}), config)
@@ -479,24 +531,29 @@ def preprocess_and_calculate_metrics(df):
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
 
+    # DDL 指数
     durations = (df['public_test_end_time'] - df['public_test_start_time']).dt.total_seconds()
     offsets = (df['public_test_last_submit'] - df['public_test_start_time']).dt.total_seconds()
     df['ddl_index'] = (offsets / durations).fillna(0.5).clip(0, 1)
 
+    # 攻防指数
     df['offense_defense_ratio'] = (df['hack_success'].fillna(0) + 1) / (df['hacked_success'].fillna(0) + 1)
 
+    # 强测扣分点
     df['strong_test_deduction_count'] = df['strong_test_issues'].apply(
         lambda x: sum(x.values()) if isinstance(x, dict) else 0)
 
+    # 加权防御分扣分项
     room_weights = {'A': 10, 'B': 8, 'C': 5}
     df['weighted_defense_deduction'] = df.apply(
-        lambda row: row['hacked_success'] * room_weights.get(row.get('room_level'), 3), axis=1)
+        lambda row: row.get('hacked_success', 0) * room_weights.get(row.get('room_level'), 3), axis=1)
 
+    # 确保字典和列表列存在且类型正确
     df['bug_fix_details'] = df['bug_fix_details'].apply(lambda x: x if isinstance(x, dict) else {})
     df['mutual_test_events'] = df['mutual_test_events'].apply(lambda x: x if isinstance(x, list) else [])
     df['hacked_total_attempts'] = df['hacked_total_attempts'].fillna(0).astype(int)
 
-    df['bug_fix_details'] = df['bug_fix_details'].fillna(value={})
+    # Bug修复相关指标
     df['bug_fix_hacked_count'] = df['bug_fix_details'].apply(lambda x: x.get('hacked_count', 0))
     df['bug_fix_unfixed_count'] = df['bug_fix_details'].apply(lambda x: x.get('unfixed_count', 0))
     df['bug_fix_hack_score'] = df['bug_fix_details'].apply(lambda x: x.get('hack_score', 0))
@@ -525,7 +582,7 @@ def create_visualizations(df, user_name, config):
 def create_performance_dashboard(df, user_name):
     """生成2x2的综合表现仪表盘"""
     fig, axes = plt.subplots(2, 2, figsize=(20, 14))
-    fig.suptitle(f'{user_name} - OO课程综合表现仪表盘 (V8.6)', fontsize=24, weight='bold')
+    fig.suptitle(f'{user_name} - OO课程综合表现仪表盘 (V8.7)', fontsize=24, weight='bold')
 
     ax1 = axes[0, 0]
     df_strong = df.dropna(subset=['strong_test_score'])
@@ -609,12 +666,13 @@ def create_unit_radar_chart(df, user_name, config):
         stats_list = [list(d.values()) for d in valid_units.values()]
         stats_array = np.array(stats_list)
         max_hacked = np.nanmax(stats_array[:, 2])
+        # 反转防守分：被hack越少，分数越高
         if max_hacked > 0: stats_array[:, 2] = max_hacked - stats_array[:, 2] 
-        else: stats_array[:, 2] = 1 
+        else: stats_array[:, 2] = 1 # 如果从未被hack，给一个最高分
         
         with np.errstate(divide='ignore', invalid='ignore'):
             max_vals = np.nanmax(stats_array, axis=0)
-            max_vals[max_vals == 0] = 1 
+            max_vals[max_vals == 0] = 1 # 避免除以0
             normalized_stats = stats_array / max_vals
         
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
@@ -632,7 +690,7 @@ def create_unit_radar_chart(df, user_name, config):
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
         plt.show()
 
-# --- 6. 动态报告生成器 V8.6 ---
+# --- 6. 动态报告生成器 V8.7 ---
 def analyze_submission_style(hw_row):
     start, end, last_submit = hw_row.get('public_test_start_time'), hw_row.get('public_test_end_time'), hw_row.get('public_test_last_submit')
     if pd.isna(start) or pd.isna(end) or pd.isna(last_submit): return random.choice(ReportCorpus.STYLE_UNKNOWN)
@@ -644,7 +702,7 @@ def analyze_submission_style(hw_row):
     else: return random.choice(ReportCorpus.STYLE_WELL_PACED)
 
 def generate_highlights(df):
-    """[V8.6-Refined] 生成最多5个多样化的个人亮点标签，优先覆盖不同类别，并使用随机选择代替评分。"""
+    """[V8.7-Refined] 生成最多5个多样化的个人亮点标签，优先覆盖不同类别，并使用随机选择代替评分。"""
     if df.empty:
         return []
     
@@ -656,6 +714,11 @@ def generate_highlights(df):
     strong_scores = df['strong_test_score'].dropna()
     mutual_df = df[df.get('has_mutual_test', pd.Series(True))].dropna(subset=['hack_success', 'hacked_success'])
     submit_times_df = df.dropna(subset=['public_test_used_times'])
+    
+    # [V8.7 新增] 优先为持续努力的同学添加标签
+    if not strong_scores.empty and strong_scores.mean() < 75 and len(df) > 10:
+        worst_hw = df.loc[strong_scores.idxmin()]
+        add_highlight("FOUNDATION_BUILDER", ReportCorpus.HIGHLIGHTS_TAGS["FOUNDATION_BUILDER"].format(hw_name=worst_hw['name']))
     
     # === 普适型标签 (成长态度) ===
     if not submit_times_df.empty:
@@ -694,7 +757,6 @@ def generate_highlights(df):
     if len(early_submitters) >= 3:
         add_highlight("FAST_STARTER", ReportCorpus.HIGHLIGHTS_TAGS["FAST_STARTER"].format(hw_name=early_submitters.iloc[0]['name']))
 
-    # === 高分与卓越型 (卓越表现) ===
     if not strong_scores.empty and not mutual_df.empty and strong_scores.min() > 95 and mutual_df['hacked_success'].sum() <= 1:
         add_highlight("ROCK_SOLID", ReportCorpus.HIGHLIGHTS_TAGS["ROCK_SOLID"].format(min_score=strong_scores.min()))
     if not mutual_df.empty and (mutual_df['hacked_success'] == 0).mean() >= 0.75:
@@ -708,6 +770,30 @@ def generate_highlights(df):
         if max_hack_row['hack_success'] >= 10:
             add_highlight("HACK_ARTIST", ReportCorpus.HIGHLIGHTS_TAGS["HACK_ARTIST"].format(hw_name=max_hack_row['name'], count=int(max_hack_row['hack_success'])))
     for _, hw in df.iterrows():
+        # === 高分与卓越型 (卓越表现) ===
+        # 判断是否为 "规划大师"
+        is_planning_master = (
+            hw.get('ddl_index', 1) < 0.3 and
+            hw.get('public_test_used_times', 99) <= 2 and
+            hw.get('strong_test_score', 0) == 100 and
+            hw.get('hacked_success', 99) == 0
+        )
+        if is_planning_master:
+            add_highlight("PLANNING_MASTER", ReportCorpus.HIGHLIGHTS_TAGS["PLANNING_MASTER"].format(
+                hw_name=hw['name'],
+                count=int(hw['public_test_used_times'])
+            ))
+
+        # 判断是否为 "铁壁小队成员"
+        is_iron_wall = (
+            hw.get('room_total_hack_success', 99) == 0 and
+            hw.get('room_total_hack_attempts', 0) > 50 # 设置一个合理的总攻击阈值
+        )
+        if is_iron_wall:
+            add_highlight("IRON_WALL_SQUAD", ReportCorpus.HIGHLIGHTS_TAGS["IRON_WALL_SQUAD"].format(
+                hw_name=hw['name'],
+                total_attacks=int(hw['room_total_hack_attempts'])
+            ))
         if pd.notna(hw.get('hack_success_rate')) and hw.get('hack_total_attempts', 0) > 3 and hw['hack_success_rate'] > 20:
             add_highlight("PRECISION_STRIKER", ReportCorpus.HIGHLIGHTS_TAGS["PRECISION_STRIKER"].format(hw_name=hw['name'], rate=hw['hack_success_rate']))
         if hw.get('hack_success', 0) > 4 and hw.get('successful_hack_targets', 100) <= 2:
@@ -752,6 +838,7 @@ def generate_highlights(df):
     available_categories = list(highlights_by_category.keys())
     random.shuffle(available_categories)
 
+    # 确保多样性
     if len(available_categories) >= 5:
         chosen_categories = random.sample(available_categories, 5)
         for category in chosen_categories:
@@ -773,7 +860,16 @@ def generate_highlights(df):
     return final_highlights[:5]
 
 def identify_student_persona(df):
+    """[V8.7 改造] 优先为成绩不理想的同学选择更温和的画像"""
     if df.empty: return "BALANCED"
+    
+    strong_scores = df['strong_test_score'].dropna()
+    avg_score = strong_scores.mean() if not strong_scores.empty else 100
+    
+    # [V8.7 新增] 如果平均分较低，优先使用鼓励性Persona
+    if avg_score < 75:
+        return "BALANCED_GENTLE"
+
     mutual_df = df[df.get('has_mutual_test', pd.Series(False))]
     if df['ddl_index'].dropna().mean() > 0.8: return "SPRINTER"
     if not mutual_df.empty and mutual_df['hack_success'].sum() > 25: return "HUNTER"
@@ -789,18 +885,33 @@ def format_uml_analysis(hw_row):
     else: return random.choice(ReportCorpus.UML_ANALYSIS["IMPERFECT"]).format(issues=', '.join(failed_checks))
 
 def _analyze_overall_performance(df):
-    """[V8.6] 辅助函数，生成宏观表现的文字分析，加入相对表现和防御韧性分析"""
+    """[V8.7-Patched] 辅助函数，生成宏观表现的文字分析，加入对C房和低分情况的同理心分析"""
     analysis_texts = []
     
     strong_scores = df['strong_test_score'].dropna()
+    avg_score = strong_scores.mean() if not strong_scores.empty else 0
+
     if not strong_scores.empty:
-        avg_score, var_score = strong_scores.mean(), strong_scores.var()
+        var_score = strong_scores.var()
         analysis_texts.append(f"强测表现: 平均分 {avg_score:.2f} | 稳定性 (方差) {var_score:.2f}")
-        if avg_score > 98: analysis_texts.append(random.choice(ReportCorpus.STRONG_TEST_HIGH_SCORE))
+        
+        # --- [V8.7 改造] 强测表现分析优化 ---
+        if avg_score > 98:
+            analysis_texts.append(random.choice(ReportCorpus.STRONG_TEST_HIGH_SCORE))
+        elif avg_score < 75:
+            struggle_hws = df[df['strong_test_score'] < 70]['name'].tolist()
+            if struggle_hws:
+                 analysis_texts.append(random.choice(ReportCorpus.STRONG_TEST_STRUGGLE).format(hw_names=', '.join(struggle_hws)))
         else:
             imperfect_hws = df[df['strong_test_score'] < 100]['name'].tolist()
-            if imperfect_hws: analysis_texts.append(random.choice(ReportCorpus.STRONG_TEST_IMPERFECTION).format(hw_names=', '.join(imperfect_hws[:2])))
-        if var_score < 15: analysis_texts.append(random.choice(ReportCorpus.CONSISTENCY_STABLE).format(variance=var_score))
+            if imperfect_hws:
+                analysis_texts.append(random.choice(ReportCorpus.STRONG_TEST_IMPERFECTION).format(hw_names=', '.join(imperfect_hws[:2])))
+        
+        if var_score < 15:
+            if avg_score > 80: # 1. 高分稳定 -> 赞美
+                analysis_texts.append(random.choice(ReportCorpus.CONSISTENCY_STABLE).format(variance=var_score))
+            else: # 2. 低分稳定 -> 鼓励寻求突破 (调用新增语料库)
+                analysis_texts.append(random.choice(ReportCorpus.CONSISTENCY_LOW_SCORE_STABLE).format(variance=var_score))
         else:
             best_hw = df.loc[df['strong_test_score'].idxmax()]['name'] if pd.notna(df['strong_test_score'].max()) else '某次作业'
             worst_hw = df.loc[df['strong_test_score'].idxmin()]['name'] if pd.notna(df['strong_test_score'].min()) else '另一次作业'
@@ -815,59 +926,47 @@ def _analyze_overall_performance(df):
         analysis_texts.append(f"\n互测战绩: 成功Hack {int(total_hacks)} 次 | 被成功Hack {int(total_hacked)} 次 (总计被攻击 {int(total_hacked_attempts)} 次)")
 
         profile_found = False
-        
-        # [V8.6 修复] Offensive profile check with accurate data
         if total_hacks > total_hacked * 2 and total_hacks >= 10:
             hw_with_most_hacks = mutual_df.loc[mutual_df['hack_success'].idxmax()]
             total_unique_targets = mutual_df['successful_hack_targets'].sum()
             total_hack_attempts = mutual_df['hack_total_attempts'].sum()
             overall_hack_rate = (total_hacks / total_hack_attempts) * 100 if total_hack_attempts > 0 else 0
-
             offensive_format_vars = {
-                'hw_name_most_hacks': hw_with_most_hacks['name'],
-                'hacks_in_best_hw': int(hw_with_most_hacks['hack_success']),
-                'total_hacks': int(total_hacks),
-                'total_unique_targets': int(total_unique_targets),
-                'overall_hack_rate': overall_hack_rate
+                'hw_name_most_hacks': hw_with_most_hacks['name'], 'hacks_in_best_hw': int(hw_with_most_hacks['hack_success']),
+                'total_hacks': int(total_hacks), 'total_unique_targets': int(total_unique_targets), 'overall_hack_rate': overall_hack_rate
             }
             analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_OFFENSIVE).format(**offensive_format_vars))
             profile_found = True
         
-        # Defensive profile check (low successful hacks)
         if total_hacked <= 3:
             analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_DEFENSIVE).format(count=int(total_hacked_attempts), hw_names="各次", hacked="多"))
             profile_found = True
         
-        # Battle-Hardened profile check (high attempts, low success rate)
         if total_hacked_attempts > 20: 
             hacked_rate = (total_hacked / total_hacked_attempts) * 100 if total_hacked_attempts > 0 else 0
             if hacked_rate < 15:
                 analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_BATTLE_HARDENED).format(
-                    total_hacked_attempts=int(total_hacked_attempts),
-                    total_hacked=int(total_hacked),
-                    rate=hacked_rate
-                ))
+                    total_hacked_attempts=int(total_hacked_attempts), total_hacked=int(total_hacked), rate=hacked_rate))
                 profile_found = True
         
         if not profile_found:
-            # [V8.6 修复] Balanced profile check with accurate data
-            balanced_format_vars = {
-                'total_hacks': int(total_hacks),
-                'total_hacked': int(total_hacked)
-            }
-            analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_BALANCED).format(**balanced_format_vars))
+            analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_BALANCED).format(total_hacks=int(total_hacks), total_hacked=int(total_hacked)))
 
-        # V8.5 新增：相对表现分析
+        # --- [V8.7 改造] 互测相对表现分析优化 ---
         room_df = df.dropna(subset=['room_level'])
         if not room_df.empty:
-            a_room_rate = (room_df['room_level'] == 'A').mean() * 100
-            if a_room_rate > 60:
-                # This format string is general enough and doesn't need specific fixes
-                analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_RELATIVE_PERFORMANCE).format(a_room_rate=a_room_rate, count=0, hw_names="多次", term="本"))
+            a_room_rate = (room_df['room_level'] == 'A').mean()
+            c_room_rate = (room_df['room_level'] == 'C').mean()
+            if a_room_rate > 0.6:
+                analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_RELATIVE_PERFORMANCE["A_ROOM"]).format(a_room_rate=a_room_rate*100))
+            elif c_room_rate > 0.6:
+                analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_RELATIVE_PERFORMANCE["C_ROOM"]))
+            else:
+                analysis_texts.append(random.choice(ReportCorpus.MUTUAL_TEST_RELATIVE_PERFORMANCE["MIXED"]))
 
         total_weighted_deduction = mutual_df['weighted_defense_deduction'].sum()
         max_possible_deduction = mutual_df.shape[0] * 10 
-        defense_score = 100 - (total_weighted_deduction / (max_possible_deduction * 10) * 100) if max_possible_deduction > 0 else 100
+        defense_score = 100 - (total_weighted_deduction / max(max_possible_deduction, 1) * 10) # 修正了计算公式
         analysis_texts.append(random.choice(ReportCorpus.DEFENSE_SCORE_ANALYSIS).format(score=max(0, defense_score)))
 
     unit2_df = df[df['unit'].str.contains("第二单元", na=False)]
@@ -885,7 +984,7 @@ def _analyze_overall_performance(df):
     return analysis_texts
 
 def _analyze_hack_strategy(df):
-    """[V8.5 新增] 分析互测博弈策略"""
+    """分析互测博弈策略"""
     texts = []
     mutual_df = df.dropna(subset=['mutual_test_start_time', 'mutual_test_end_time', 'mutual_test_events'])
     mutual_df = mutual_df[mutual_df['mutual_test_events'].apply(len) > 0]
@@ -928,15 +1027,17 @@ def _analyze_hack_strategy(df):
 
 def generate_dynamic_report(df, user_name, config):
     print("\n" + "="*80)
-    print(f" {user_name} - OO课程动态学习轨迹报告 V8.6 ".center(80, "="))
+    print(f" {user_name} - OO课程动态学习轨迹报告 V8.7 ".center(80, "="))
     print("="*80)
     
     if df.empty:
         print("\n未找到该学生的有效作业数据，请检查配置文件。")
         return
 
-    persona = identify_student_persona(df)
-    print("\n" + ReportCorpus.PERSONA_ANALYSIS[persona].format(user_name=user_name))
+    # [V8.7 改造] 使用新的persona选择逻辑
+    persona_key = identify_student_persona(df)
+    persona_text = ReportCorpus.PERSONA_ANALYSIS.get(persona_key, ReportCorpus.PERSONA_ANALYSIS["BALANCED"])
+    print("\n" + persona_text.format(user_name=user_name))
 
     highlights = generate_highlights(df)
     if highlights:
@@ -1000,6 +1101,17 @@ def generate_dynamic_report(df, user_name, config):
         print(random.choice(ReportCorpus.HACK_STRATEGY_INTRO))
         for text in hack_strategy_texts:
             print(text)
+    
+     # --- [V9.0 新增] 房间生态分析模块 ---
+    peace_room_text_generated = False
+    for _, hw in df.iterrows():
+        if hw.get('room_total_hack_success', 99) == 0 and hw.get('room_total_hack_attempts', 0) > 50:
+            if not peace_room_text_generated:
+                peace_room_text_generated = True
+            print(random.choice(ReportCorpus.ROOM_ECOLOGY_ANALYSIS["PEACE_ROOM"]).format(
+                hw_name=hw['name'],
+                total_attacks=int(hw['room_total_hack_attempts'])
+            ))
 
     print("\n" + "--- 7. 逐次作业深度解析 ---".center(70))
     print(random.choice(ReportCorpus.HW_ANALYSIS_INTRO))

@@ -136,7 +136,7 @@ async def main(_id, pwd):
     async with async_playwright() as p:
         # 1. 启动浏览器
         browser = await p.chromium.launch(
-            headless=False  # 设置为 False 可以看到浏览器界面，方便调试
+            headless=True  # 设置为 False 可以看到浏览器界面，方便调试
         )
         context = await browser.new_context()
         page = await context.new_page()

@@ -132,7 +132,11 @@ def get_unit_from_hw_num(hw_num, config):
 
 def is_target_user(data_dict, config):
     if not isinstance(data_dict, dict): return False
-    return any(data_dict.get(k) == v for k, v in config["USER_INFO"].items())
+    # [V9.0 新增] 增加对 student_id 的直接检查，因为 event 中可能只有学号
+    user_id = str(config["USER_INFO"]["student_id"])
+    if 'student_id' in data_dict and str(data_dict['student_id']) == user_id:
+        return True
+    return any(data_dict.get(k) == v for k, v in config["USER_INFO"].items() if v is not None)
 
 def parse_course_data(raw_data, config):
     homework_data = {}
@@ -164,6 +168,10 @@ def parse_course_data(raw_data, config):
             })
         elif 'ultimate_test/submit' in item['url'] and is_target_user(body_data.get('user', {}), config):
             homework_data[hw_id]['strong_test_score'] = body_data.get('score')
+            # [V9.4 新增] 解析代码风格分数
+            if 'style' in body_data and 'score' in body_data['style']:
+                homework_data[hw_id]['style_score'] = body_data['style']['score']
+            homework_data[hw_id]['strong_test_score'] = body_data.get('score')
             results = body_data.get('results', [])
             issue_counter = Counter(p['message'] for p in results if p.get('message') != 'ACCEPTED')
             homework_data[hw_id]['strong_test_issues'] = dict(issue_counter) if issue_counter else {}
@@ -173,6 +181,8 @@ def parse_course_data(raw_data, config):
             homework_data[hw_id]['has_mutual_test'] = True # 确认有互测
             all_members = body_data.get('members', [])
             all_events = body_data.get('events', [])
+            # [V9.0 新增] 存储完整的房间事件，用于上下文分析（如“第一滴血”）
+            homework_data[hw_id]['room_events'] = all_events
             room_hacked_counts = [int(m.get('hacked', {}).get('success', 0)) for m in all_members]
             if room_hacked_counts:
                 homework_data[hw_id]['room_total_hacked'] = sum(room_hacked_counts)
@@ -184,9 +194,10 @@ def parse_course_data(raw_data, config):
 
             for member in all_members:
                 if is_target_user(member, config):
-                    my_hack_events = [
-                        {'time': e['submitted_at'], 'target': e['hacked']['student_id']}
-                        for e in all_events if is_target_user(e.get('hack', {}), config)
+                    # [V9.0 优化] mutual_test_events 现在直接从 all_events 过滤，代表所有成功的 hack
+                    # 这比之前依赖'your_success'更直接、更准确
+                    my_successful_hack_events = [
+                        e for e in all_events if is_target_user(e.get('hack', {}), config)
                     ]
                     successful_targets = sum(1 for m in all_members if int(m.get('hacked', {}).get('your_success', 0)) > 0)
 
@@ -197,7 +208,7 @@ def parse_course_data(raw_data, config):
                         'hacked_success': int(member.get('hacked', {}).get('success', 0)),
                         'hacked_total_attempts': int(member.get('hacked', {}).get('total', 0)),
                         'room_level': body_data.get('mutual_test', {}).get('level', 'N/A').upper(),
-                        'mutual_test_events': my_hack_events,
+                        'mutual_test_events': my_successful_hack_events, # 使用新过滤的事件列表
                         'successful_hack_targets': successful_targets
                     })
                     break
@@ -249,6 +260,7 @@ def preprocess_and_calculate_metrics(df):
     # 确保字典和列表列存在且类型正确
     df['bug_fix_details'] = df['bug_fix_details'].apply(lambda x: x if isinstance(x, dict) else {})
     df['mutual_test_events'] = df['mutual_test_events'].apply(lambda x: x if isinstance(x, list) else [])
+    df['room_events'] = df['room_events'].apply(lambda x: x if isinstance(x, list) else []) # 新增此行
     df['hacked_total_attempts'] = df['hacked_total_attempts'].fillna(0).astype(int)
 
     # Bug修复相关指标
@@ -399,163 +411,281 @@ def analyze_submission_style(hw_row):
     elif ratio >= 0.8: return random.choice(REPORT_CORPUS["SUBMISSION"]["STYLE"]["DDL_FIGHTER"])
     else: return random.choice(REPORT_CORPUS["SUBMISSION"]["STYLE"]["WELL_PACED"])
 
-def generate_highlights(df):
-    """[V8.7-Refined] 生成最多5个多样化的个人亮点标签，优先覆盖不同类别，并使用随机选择代替评分。"""
+def generate_highlights(df, config):
+    """[V8.9-Upgraded] 生成个人亮点，计算元成就，并返回用于展示的列表和所有已解锁成就的详细信息。"""
     if df.empty:
-        return []
-    
-    all_possible_highlights = []
+        return [], {}
 
-    def add_highlight(key, text):
-        all_possible_highlights.append((key, text))
+    # earned_achievements 将存储解锁的成就及其详细信息
+    # 格式: {'KEY': {'description': '...', 'context': '于 ...'}}
+    earned_achievements = {}
+
+    def add_highlight(key, context_str, **kwargs):
+        """辅助函数，添加成就并记录其描述和上下文。"""
+        if key not in earned_achievements:
+            template = REPORT_CORPUS["HIGHLIGHTS"]["TAGS"][key]["description"]
+            earned_achievements[key] = {
+                'description': template.format(**kwargs),
+                'context': context_str
+            }
 
     strong_scores = df['strong_test_score'].dropna()
     mutual_df = df[df.get('has_mutual_test', pd.Series(True))].dropna(subset=['hack_success', 'hacked_success'])
     submit_times_df = df.dropna(subset=['public_test_used_times'])
-    
-    # [V8.7 新增] 优先为持续努力的同学添加标签
+
+    # --- 1. 基础成就检查 (为每个成就添加 context_str) ---
+
+    # [V8.7] 坚实奠基者
     if not strong_scores.empty and strong_scores.mean() < 75 and len(df) > 10:
         worst_hw = df.loc[strong_scores.idxmin()]
-        add_highlight("FOUNDATION_BUILDER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["FOUNDATION_BUILDER"].format(hw_name=worst_hw['name']))
-    
-    # === 普适型标签 (成长态度) ===
+        add_highlight("FOUNDATION_BUILDER", f"于 {worst_hw['name']}", hw_name=worst_hw['name'])
+
+    # [V8.7] 勤奋的探索者
     if not submit_times_df.empty:
         total_submissions = int(submit_times_df['public_test_used_times'].sum())
-        if total_submissions > 30: 
-            add_highlight("DILIGENT_EXPLORER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["DILIGENT_EXPLORER"].format(total_submissions=total_submissions))
+        if total_submissions > 30:
+            add_highlight("DILIGENT_EXPLORER", "于 整个学期", total_submissions=total_submissions)
+
+    # [V8.7] 坚韧不拔
     if len(strong_scores) > 1:
         for i in range(len(df) - 1):
             hw1, hw2 = df.iloc[i], df.iloc[i+1]
             s1, s2 = hw1.get('strong_test_score'), hw2.get('strong_test_score')
             if pd.notna(s1) and pd.notna(s2) and s1 < 80 and s2 - s1 > 15:
-                add_highlight("THE_PERSEVERER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["THE_PERSEVERER"].format(low_score_hw=hw1['name'], rebound_hw=hw2['name']))
-                break
+                add_highlight("THE_PERSEVERER", f"于 {hw2['name']}", low_score_hw=hw1['name'], rebound_hw=hw2['name'])
+                break # 只记录第一次重大反弹
+
+    # [V8.7] 积极的协作者
     if not mutual_df.empty:
         active_row = mutual_df.loc[mutual_df['hack_total_attempts'].idxmax(skipna=True)] if 'hack_total_attempts' in mutual_df.columns and not mutual_df['hack_total_attempts'].empty else None
         if active_row is not None and active_row['hack_total_attempts'] > 10:
-             add_highlight("ACTIVE_COLLABORATOR", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["ACTIVE_COLLABORATOR"].format(hw_name=active_row['name'], hack_attempts=int(active_row['hack_total_attempts'])))
+             add_highlight("ACTIVE_COLLABORATOR", f"于 {active_row['name']}", hw_name=active_row['name'], hack_attempts=int(active_row['hack_total_attempts']))
+
+    # [V8.0] 漏洞修复专家
     bugfix_df = df.dropna(subset=['bug_fix_hacked_count'])
     if not bugfix_df.empty and bugfix_df['bug_fix_hacked_count'].sum() > 0 and bugfix_df['bug_fix_unfixed_count'].sum() == 0:
-        add_highlight("BUG_FIXER_PRO", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["BUG_FIXER_PRO"])
+        add_highlight("BUG_FIXER_PRO", "于 整个学期")
+
+    # [V8.0] 并发挑战者
     unit2_df = df[df['unit'].str.contains("第二单元", na=False)]
     if not unit2_df.empty:
         has_perf_issues = any("TIME" in str(s) for s in unit2_df['strong_test_issues'].dropna())
         if has_perf_issues and unit2_df['strong_test_score'].mean() > 95:
-             add_highlight("PERFORMANCE_CHALLENGER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["PERFORMANCE_CHALLENGER"])
+             add_highlight("PERFORMANCE_CHALLENGER", "于 第二单元")
 
-    # === 效率与方法型 (高效策略) ===
+    # [V7.0] DDL逆袭者
     ddl_comeback_df = df[(df['ddl_index'] > 0.9) & (df['strong_test_score'] > 85)]
     if len(ddl_comeback_df) >= 2:
-        add_highlight("DEADLINE_COMEBACK", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["DEADLINE_COMEBACK"].format(hw_name=ddl_comeback_df.iloc[0]['name']))
-    if not submit_times_df.empty:
+        add_highlight("DEADLINE_COMEBACK", f"于 {ddl_comeback_df.iloc[0]['name']}", hw_name=ddl_comeback_df.iloc[0]['name'])
+
+    # 效率奇才
+    if not submit_times_df.empty and not submit_times_df['public_test_used_times'].empty:
         min_submit_row = submit_times_df.loc[submit_times_df['public_test_used_times'].idxmin()]
         if min_submit_row['public_test_used_times'] <= 2:
-            add_highlight("EFFICIENCY_ACE", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["EFFICIENCY_ACE"].format(hw_name=min_submit_row['name']))
+            add_highlight("EFFICIENCY_ACE", f"于 {min_submit_row['name']}", hw_name=min_submit_row['name'])
+
+    # 开局冲刺手
     early_submitters = df[df['ddl_index'] < 0.1]
     if len(early_submitters) >= 3:
-        add_highlight("FAST_STARTER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["FAST_STARTER"].format(hw_name=early_submitters.iloc[0]['name']))
+        add_highlight("FAST_STARTER", f"于 {early_submitters.iloc[0]['name']}", hw_name=early_submitters.iloc[0]['name'])
 
+    # 稳如磐石
     if not strong_scores.empty and not mutual_df.empty and strong_scores.min() > 95 and mutual_df['hacked_success'].sum() <= 1:
-        add_highlight("ROCK_SOLID", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["ROCK_SOLID"].format(min_score=strong_scores.min()))
+        add_highlight("ROCK_SOLID", "于 整个学期", min_score=strong_scores.min())
+
+    # 防御大师
     if not mutual_df.empty and (mutual_df['hacked_success'] == 0).mean() >= 0.75:
-        add_highlight("DEFENSE_MASTER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["DEFENSE_MASTER"])
+        add_highlight("DEFENSE_MASTER", "于 整个学期")
+
+    # 学霸本色
     if not strong_scores.empty and strong_scores.mean() > 98.5:
-        add_highlight("TOP_SCORER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["TOP_SCORER"].format(avg_score=strong_scores.mean()))
-    
-    # === 博弈/情景化标签 (博弈高手 & 卓越表现) ===
+        add_highlight("TOP_SCORER", "于 整个学期", avg_score=strong_scores.mean())
+
+    # 机会主义黑客
     if not mutual_df.empty and not mutual_df['hack_success'].empty:
         max_hack_row = mutual_df.loc[mutual_df['hack_success'].idxmax()]
         if max_hack_row['hack_success'] >= 10:
-            add_highlight("HACK_ARTIST", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["HACK_ARTIST"].format(hw_name=max_hack_row['name'], count=int(max_hack_row['hack_success'])))
+            add_highlight("HACK_ARTIST", f"于 {max_hack_row['name']}", hw_name=max_hack_row['name'], count=int(max_hack_row['hack_success']))
+
+    style_df = df.dropna(subset=['style_score'])
+    if not style_df.empty and (style_df['style_score'] == 100).all():
+        add_highlight("CODE_ARTISAN", "于 整个学期")
+        
+    # --- 得分精算师 ---
+    bugfix_df = df.dropna(subset=['bug_fix_hack_score', 'bug_fix_hacked_score'])
+    if not bugfix_df.empty:
+        total_hack_score = bugfix_df['bug_fix_hack_score'].sum()
+        total_hacked_score = bugfix_df['bug_fix_hacked_score'].sum()
+        # 避免除零，并确保有实际得分
+        if total_hacked_score > 0 and total_hack_score > 0:
+            ratio = total_hack_score / total_hacked_score
+            if 0.9 <= ratio <= 1.1:
+                add_highlight("SCORE_ACTUARY", "于 整个学期")
+
+    # 逐作业成就检查
     for _, hw in df.iterrows():
-        # === 高分与卓越型 (卓越表现) ===
-        # 判断是否为 "规划大师"
-        is_planning_master = (
-            hw.get('ddl_index', 1) < 0.3 and
-            hw.get('public_test_used_times', 99) <= 2 and
-            hw.get('strong_test_score', 0) == 100 and
-            hw.get('hacked_success', 99) == 0
-        )
+        # [V9.2 新增] 提取当前作业的关键信息
+        my_events = hw.get('mutual_test_events', [])
+        all_events = hw.get('room_events', [])
+        end_time = hw.get('mutual_test_end_time')
+        # [V9.3 新增] “团灭”成就判定
+        member_count = hw.get('room_member_count', 0)
+        target_count = hw.get('successful_hack_targets', 0)
+
+        # 确保房间内不只有自己一个人
+        if member_count > 1 and target_count == (member_count - 1):
+            add_highlight("ANNIHILATION", f"于 {hw['name']}", hw_name=hw['name'])
+
+        # --- 浴火重生 ---
+        room_hacks = hw.get('room_total_hacked', 0)
+        my_hacked = hw.get('hacked_success', 0)
+        score = hw.get('strong_test_score', 0)
+        if room_hacks > 25 and my_hacked > 0 and score > 90:
+            add_highlight("PHOENIX_REBIRTH", f"于 {hw['name']}", hw_name=hw['name'])
+            
+        # --- 破冰者 (优化版) ---
+        room_hack_success = hw.get('room_total_hack_success', 0)
+        my_hack_success = hw.get('hack_success', 0)
+        # 确保是“和平”局（总成功hack不多），且我方贡献了绝大部分
+        if 0 < room_hack_success <= 5:
+            if my_hack_success > 0 and (my_hack_success / room_hack_success) >= 0.8:
+                add_highlight("ICE_BREAKER", f"于 {hw['name']}", hw_name=hw['name'])
+
+        # --- 压哨绝杀 ---
+        if my_events and pd.notna(end_time):
+            for event in my_events:
+                hack_time_str = event.get('submitted_at')
+                if not hack_time_str: continue
+                hack_time = pd.to_datetime(hack_time_str)
+                # 检查时间差是否小于1小时 (3600秒)
+                if pd.notna(hack_time) and (end_time - hack_time).total_seconds() < 3600:
+                    add_highlight("BUZZER_BEATER", f"于 {hw['name']}", hw_name=hw['name'])
+                    break # 每个作业只记录一次
+
+        # --- 连锁反应 ---
+        if my_events:
+            # 按提交时间戳对成功的hack进行分组计数
+            submission_counts = Counter(e.get('submitted_at') for e in my_events if e.get('submitted_at'))
+            if submission_counts:
+                top_submission = submission_counts.most_common(1)[0]
+                if top_submission[1] >= 3: # 如果单次提交成功次数 >= 3
+                    add_highlight("CHAIN_REACTION", f"于 {hw['name']}", hw_name=hw['name'], count=top_submission[1])
+
+        # --- 反戈一击 ---
+        if all_events:
+            was_hacked = False
+            hacked_time = pd.Timestamp.min.tz_localize('UTC') if pd.Timestamp.min.tz is None else pd.Timestamp.min
+            
+            # 确保 all_events 按时间排序
+            sorted_events = sorted(all_events, key=lambda x: x.get('submitted_at', ''))
+            
+            for event in sorted_events:
+                event_time_str = event.get('submitted_at')
+                if not event_time_str: continue
+                event_time = pd.to_datetime(event_time_str)
+
+                # 如果我被攻击了，记录时间和状态
+                if is_target_user(event.get('hacked', {}), config):
+                    was_hacked = True
+                    hacked_time = event_time
+                
+                # 如果我之前被攻击过，并且现在我攻击了别人
+                if was_hacked and is_target_user(event.get('hack', {}), config):
+                    # 确保这次攻击发生在被攻击之后
+                    if event_time > hacked_time:
+                        add_highlight("COUNTER_ATTACK", f"于 {hw['name']}", hw_name=hw['name'])
+                        break # 找到一次反击即可
+
+        # [V9.0 新增] 第一滴血成就判定
+        all_events = hw.get('room_events', [])
+        if all_events and is_target_user(all_events[0].get('hack', {}), config):
+            add_highlight("FIRST_BLOOD", f"于 {hw['name']}", hw_name=hw['name'])
+
+        # [新增] 规划大师
+        is_planning_master = (hw.get('ddl_index', 1) < 0.3 and hw.get('public_test_used_times', 99) <= 2 and
+                              hw.get('strong_test_score', 0) == 100 and hw.get('hacked_success', 99) == 0)
         if is_planning_master:
-            add_highlight("PLANNING_MASTER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["PLANNING_MASTER"].format(
-                hw_name=hw['name'],
-                count=int(hw['public_test_used_times'])
-            ))
+            add_highlight("PLANNING_MASTER", f"于 {hw['name']}", hw_name=hw['name'], count=int(hw['public_test_used_times']))
 
-        # 判断是否为 "铁壁小队成员"
-        is_iron_wall = (
-            hw.get('room_total_hack_success', 99) == 0 and
-            hw.get('room_total_hack_attempts', 0) > 50 # 设置一个合理的总攻击阈值
-        )
+        # [新增] 铁壁小队成员
+        is_iron_wall = (hw.get('room_total_hack_success', 99) == 0 and hw.get('room_total_hack_attempts', 0) > 50)
         if is_iron_wall:
-            add_highlight("IRON_WALL_SQUAD", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["IRON_WALL_SQUAD"].format(
-                hw_name=hw['name'],
-                total_attacks=int(hw['room_total_hack_attempts'])
-            ))
-        if pd.notna(hw.get('hack_success_rate')) and hw.get('hack_total_attempts', 0) > 3 and hw['hack_success_rate'] > 20:
-            add_highlight("PRECISION_STRIKER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["PRECISION_STRIKER"].format(hw_name=hw['name'], rate=hw['hack_success_rate']))
-        if hw.get('hack_success', 0) > 4 and hw.get('successful_hack_targets', 100) <= 2:
-            add_highlight("TACTICAL_MASTER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["TACTICAL_MASTER"].format(hw_name=hw['name'], target_count=int(hw['successful_hack_targets'])))
-        if hw.get('room_total_hacked', 0) > 20 and hw.get('hacked_success', 100) <= 1:
-            add_highlight("STORM_SURVIVOR", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["STORM_SURVIVOR"].format(hw_name=hw['name'], room_total_hacked=int(hw['room_total_hacked']), self_hacked=int(hw['hacked_success'])))
+            add_highlight("IRON_WALL_SQUAD", f"于 {hw['name']}", hw_name=hw['name'], total_attacks=int(hw['room_total_hack_attempts']))
 
-    # === 单元专精与成长型 (卓越表现 & 成长态度) ===
+        # [V8.9 修正逻辑] 精准打击者
+        if pd.notna(hw.get('hack_success_rate')) and hw['hack_success_rate'] > 8:
+            add_highlight("PRECISION_STRIKER", f"于 {hw['name']}", hw_name=hw['name'], rate=hw['hack_success_rate'])
+
+        # [V9.0 优化] “战术大师”的判定，现在直接基于事件日志，更准确
+        targets = hw.get('successful_hack_targets', 0)
+        successes = hw.get('hack_success', 0)
+        if targets > 0 and successes > 3 and (successes / targets) > 1.8: # 使用更严格的比率
+            add_highlight("TACTICAL_MASTER", f"于 {hw['name']}", hw_name=hw['name'], target_count=int(targets), hack_count=int(successes))
+
+        # [V8.5] 风暴幸存者
+        if hw.get('room_total_hacked', 0) > 20 and hw.get('hacked_success', 100) <= 1:
+            add_highlight("STORM_SURVIVOR", f"于 {hw['name']}", hw_name=hw['name'], room_total_hacked=int(hw['room_total_hacked']), self_hacked=int(hw['hacked_success']))
+
+    # 表达式大师
+    unit1_df = df[df['unit'].str.contains("第一单元", na=False)]
+    if not unit1_df.empty and unit1_df['strong_test_score'].mean() > 98 and unit1_df['hacked_success'].sum() <= 4:
+        add_highlight("EXPRESSION_GURU", "于 第一单元")
+
+    # [新增] 并发指挥家 (第二单元)
+    unit2_df = df[df['unit'].str.contains("第二单元", na=False)]
+    if not unit2_df.empty and unit2_df['strong_test_score'].mean() > 95 and unit2_df['hacked_success'].sum() <= 8:
+        # 复用之前计算过的unit2_df
+        add_highlight("CONCURRENCY_CONDUCTOR", "于 第二单元")
+
+    # JML大师
     unit3_df = df[df['unit'].str.contains("第三单元", na=False)]
     if not unit3_df.empty and unit3_df['strong_test_score'].mean() > 99 and unit3_df['hacked_success'].sum() == 0:
-        add_highlight("JML_MASTER", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["JML_MASTER"])
+        add_highlight("JML_MASTER", "于 第三单元")
+
+    # UML专家
     unit4_df = df[df['unit'].str.contains("第四单元", na=False)]
     if not unit4_df.empty and unit4_df['strong_test_score'].mean() == 100:
         is_perfect = all(all(r['message'] == 'ACCEPTED' for r in row.get('uml_detailed_results', [])) for _, row in unit4_df.iterrows() if row.get('uml_detailed_results'))
         if is_perfect:
-            add_highlight("UML_EXPERT", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["UML_EXPERT"])
+            add_highlight("UML_EXPERT", "于 第四单元")
+
+    # [V8.0] 架构迭代大师
     for unit_name in df['unit'].unique():
         unit_df = df[df['unit'] == unit_name].sort_values('hw_num')
         if len(unit_df) > 1:
             scores = unit_df['strong_test_score'].dropna()
             if len(scores) > 1 and scores.iloc[-1] - scores.iloc[0] > 10 and scores.iloc[-1] > 95:
-                add_highlight("REFACTOR_VIRTUOSO", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["REFACTOR_VIRTUOSO"].format(unit_name=re.sub(r'：.*', '', unit_name), hw_name_before=unit_df.iloc[0]['name'], hw_name_after=unit_df.iloc[-1]['name']))
-                break
+                unit_name_short = re.sub(r'：.*', '', unit_name)
+                add_highlight("REFACTOR_VIRTUOSO", f"于 {unit_name_short}", unit_name=unit_name_short, hw_name_before=unit_df.iloc[0]['name'], hw_name_after=unit_df.iloc[-1]['name'])
+                break # 每个单元只记录一次
+
+    # [V8.0] 王者归来
     unit_scores = df.groupby('unit')['strong_test_score'].mean()
     u1_key, u4_key = "第一单元：表达式求导", "第四单元：UML解析"
     if u1_key in unit_scores and u4_key in unit_scores:
         u1_score, u4_score = unit_scores[u1_key], unit_scores[u4_key]
         if pd.notna(u1_score) and pd.notna(u4_score) and u4_score > u1_score + 2:
-            add_highlight("COMEBACK_KING", REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]["COMEBACK_KING"].format(u1_score=u1_score, u4_score=u4_score))
+            add_highlight("COMEBACK_KING", "于 整个学期", u1_score=u1_score, u4_score=u4_score)
 
-    if not all_possible_highlights:
-        return []
+    # --- 2. 元成就计算 ---
+    if len(earned_achievements) > 5:
+        add_highlight("DECORATED_DEVELOPER", "于 整个学期")
 
-    highlights_by_category = {}
-    for key, text in all_possible_highlights:
-        category = REPORT_CORPUS["HIGHLIGHTS"]["CATEGORIES"].get(key, "其他")
-        if category not in highlights_by_category:
-            highlights_by_category[category] = []
-        highlights_by_category[category].append(text)
+    all_possible_keys = set(REPORT_CORPUS["HIGHLIGHTS"]["TAGS"].keys())
+    keys_to_check_for_mastery = all_possible_keys - {"COLLECTION"}
+    if len(all_possible_keys) >= len(keys_to_check_for_mastery) * 0.8:
+        add_highlight("COLLECTION", "于 整个学期")
 
-    final_highlights = []
-    available_categories = list(highlights_by_category.keys())
-    random.shuffle(available_categories)
+    # --- 3. 随机选择5个亮点用于报告主体展示 ---
+    if not earned_achievements:
+        return [], {}
 
-    # 确保多样性
-    if len(available_categories) >= 5:
-        chosen_categories = random.sample(available_categories, 5)
-        for category in chosen_categories:
-            final_highlights.append(random.choice(highlights_by_category[category]))
-    else:
-        leftover_highlights = []
-        for category in available_categories:
-            category_highlights = highlights_by_category[category]
-            random.shuffle(category_highlights)
-            final_highlights.append(category_highlights.pop(0))
-            leftover_highlights.extend(category_highlights)
-        
-        needed = 5 - len(final_highlights)
-        if needed > 0 and leftover_highlights:
-            random.shuffle(leftover_highlights)
-            final_highlights.extend(leftover_highlights[:needed])
+    highlight_texts_to_choose_from = [d['description'] for d in earned_achievements.values()]
+    random.shuffle(highlight_texts_to_choose_from)
+    final_highlights_for_display = highlight_texts_to_choose_from[:5]
 
-    random.shuffle(final_highlights)
-    return final_highlights[:5]
+    # --- 4. 返回最终结果 ---
+    return final_highlights_for_display, earned_achievements
 
 def identify_student_persona(df):
     """[V8.7 改造] 优先为成绩不理想的同学选择更温和的画像"""
@@ -682,72 +812,110 @@ def _analyze_overall_performance(df):
     return analysis_texts
 
 def _analyze_hack_strategy(df):
-    """分析互测博弈策略"""
+    """[V9.0 升级] 分析互测博弈策略，包含时机、目标选择和有效性"""
     texts = []
-    mutual_df = df.dropna(subset=['mutual_test_start_time', 'mutual_test_end_time', 'mutual_test_events'])
-    mutual_df = mutual_df[mutual_df['mutual_test_events'].apply(len) > 0]
+    # 筛选出包含有效互测事件和相关时间的作业
+    mutual_df = df.dropna(subset=['mutual_test_start_time', 'mutual_test_end_time', 'hack_success_rate'])
+    # 确保 mutual_test_events 列非空
+    mutual_df = mutual_df[mutual_df['mutual_test_events'].apply(lambda x: isinstance(x, list) and len(x) > 0)]
+    
     if mutual_df.empty:
         return []
 
-    early_hacks, late_hacks, total_hacks = 0, 0, 0
-    total_attempts, total_unique_targets = 0, 0
-
+    # --- 1. 时机分析 (Timing Analysis) ---
+    early_hacks, late_hacks, total_hack_events = 0, 0, 0
     for _, hw in mutual_df.iterrows():
         duration = (hw['mutual_test_end_time'] - hw['mutual_test_start_time']).total_seconds()
         if duration <= 0: continue
-        events = hw['mutual_test_events']
-        total_hacks += len(events)
-        total_attempts += len(events)
-        total_unique_targets += len(set(e['target'] for e in events))
-
+        
+        events = hw.get('mutual_test_events', [])
+        total_hack_events += len(events)
+        
         for event in events:
-            hack_time = pd.to_datetime(event['time'])
+            # 确保 event 是字典并且包含 'time' 键
+            # [修正] 旧版数据格式为 {'time':...}, 新版为 {'submitted_at':...}
+            # 为了兼容，我们直接从 event 中获取时间
+            event_time_str = event.get('submitted_at')
+            if not event_time_str: continue
+
+            hack_time = pd.to_datetime(event_time_str)
             ratio = (hack_time - hw['mutual_test_start_time']).total_seconds() / duration
             if ratio < 0.1: early_hacks += 1
             if ratio > 0.9: late_hacks += 1
 
-    if total_hacks == 0: return []
-    
-    if early_hacks / total_hacks > 0.5:
-        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TIMING"]["EARLY_BIRD"])
-    elif late_hacks / total_hacks > 0.5:
-        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TIMING"]["DEADLINE_SNIPER"])
-    else:
-        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TIMING"]["CONSISTENT_PRESSURE"])
+    if total_hack_events > 0:
+        if early_hacks / total_hack_events > 0.5:
+            texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TIMING"]["EARLY_BIRD"])
+        elif late_hacks / total_hack_events > 0.5:
+            texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TIMING"]["DEADLINE_SNIPER"])
+        else:
+            texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TIMING"]["CONSISTENT_PRESSURE"])
 
-    concentration_ratio = total_attempts / total_unique_targets if total_unique_targets > 0 else 0
-    if concentration_ratio > 2.5:
-        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TARGETING"]["FOCUSED_FIRE"])
-    else:
-        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TARGETING"]["WIDE_NET"])
+    # --- 2. 目标选择分析 (Targeting Analysis) ---
+    texts.append("") # 添加一个空行用于分隔
+    focused_fire_count = 0
+    wide_net_count = 0
+    for _, hw in mutual_df.iterrows():
+        my_events = hw.get('mutual_test_events', [])
+        if not my_events: continue
+        
+        total_hacks = len(my_events)
+        
+        # [V9.0 修正] 从完整的事件结构中正确提取目标ID
+        # 这里是关键的修复点：不再使用 e['target']
+        unique_targets = len(set(e['hacked']['student_id'] for e in my_events if 'hacked' in e and 'student_id' in e['hacked']))
+        
+        if total_hacks > 2 and unique_targets > 0:
+            if (total_hacks / unique_targets) > 1.8:
+                focused_fire_count += 1
+            else:
+                wide_net_count += 1
     
+    if focused_fire_count > wide_net_count:
+        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TARGETING"]["FOCUSED_FIRE"])
+    elif wide_net_count > 0:
+        texts.append(REPORT_CORPUS["HACK_STRATEGY"]["TARGETING"]["WIDE_NET"])
+        
+    # --- 3. 有效性分析 (Effectiveness Analysis) ---
+    texts.append("")
+    total_hacks_ever = mutual_df['hack_success'].sum()
+    avg_effectiveness_rate = mutual_df['hack_success_rate'].mean()
+    if pd.notna(avg_effectiveness_rate):
+        if avg_effectiveness_rate > 8:
+            texts.append(REPORT_CORPUS["HACK_STRATEGY"]["EFFECTIVENESS"]["HIGH_EFFICIENCY"])
+        elif total_hacks_ever > 0:
+            texts.append(REPORT_CORPUS["HACK_STRATEGY"]["EFFECTIVENESS"]["PERSISTENT_EFFORT"])
+
     return texts
 
 def generate_dynamic_report(df, user_name, config):
     print("\n" + "="*80)
-    print(f" {user_name} - OO课程动态学习轨迹报告 V8.7 ".center(80, "="))
+    print(f" {user_name} - OO课程动态学习轨迹报告 V8.9 ".center(80, "="))
     print("="*80)
-    
+
     if df.empty:
         print("\n未找到该学生的有效作业数据，请检查配置文件。")
         return
 
-    # [V8.7 改造] 使用新的persona选择逻辑
     persona_key = identify_student_persona(df)
     persona_text = REPORT_CORPUS["PERSONA"].get(persona_key, REPORT_CORPUS["PERSONA"]["BALANCED"])
     print("\n" + persona_text.format(user_name=user_name))
 
-    highlights = generate_highlights(df)
-    if highlights:
+    # [修改] 接收新的返回值
+    highlights_for_display, earned_achievements_details = generate_highlights(df, config)
+    earned_highlight_keys = set(earned_achievements_details.keys())
+
+    if highlights_for_display:
         print("\n" + "--- 1. 个人亮点标签 ---".center(70))
         print(random.choice(REPORT_CORPUS["HIGHLIGHTS"]["INTRO"]))
-        for tag in highlights:
-            print(tag)
+        for tag_text in highlights_for_display:
+            print(tag_text)
 
+    # --- 报告主体部分 (2-7) ---
     print("\n" + "--- 2. 宏观学期表现与深度洞察 ---".center(70))
     for text in _analyze_overall_performance(df):
         print(text)
-    
+
     print("\n" + "--- 3. 开发者责任感与调试能力 (Bug修复) ---".center(70))
     bugfix_df = df.dropna(subset=['bug_fix_hacked_count'])
     total_bugs = bugfix_df['bug_fix_hacked_count'].sum()
@@ -755,7 +923,7 @@ def generate_dynamic_report(df, user_name, config):
         fixed_bugs = total_bugs - bugfix_df['bug_fix_unfixed_count'].sum()
         fix_rate = (fixed_bugs / total_bugs) * 100
         print(REPORT_CORPUS["BUG_FIX"]["ANALYSIS"]["HIGH_FIX_RATE" if fix_rate > 80 else "LOW_FIX_RATE"].format(total_bugs=int(total_bugs), fixed_bugs=int(fixed_bugs), rate=fix_rate))
-            
+
         total_hack_score, total_hacked_score = bugfix_df['bug_fix_hack_score'].sum(), bugfix_df['bug_fix_hacked_score'].sum()
         if total_hack_score + total_hacked_score > 0:
             ratio = (total_hack_score + 0.1) / (total_hacked_score + 0.1)
@@ -778,17 +946,17 @@ def generate_dynamic_report(df, user_name, config):
         early_avg, later_avg = strong_scores.iloc[:len(strong_scores)//2].mean(), strong_scores.iloc[len(strong_scores)//2:].mean()
         if later_avg > early_avg + 1:
             print(random.choice(REPORT_CORPUS["ANALYSIS"]["GROWTH"]).format(early_avg=early_avg, later_avg=later_avg))
-            
+
     print("\n" + "--- 5. 提交行为与风险分析 ---".center(70))
     print(random.choice(REPORT_CORPUS["SUBMISSION"]["INTRO"]))
     submit_times_df = df.dropna(subset=['public_test_used_times'])
-    if not submit_times_df.empty:
+    if not submit_times_df.empty and not submit_times_df['public_test_used_times'].empty:
         total_submissions = submit_times_df['public_test_used_times'].sum()
         print(f"本学期你共提交 {int(total_submissions)} 次代码。")
         most_submitted, least_submitted = submit_times_df.loc[submit_times_df['public_test_used_times'].idxmax()], submit_times_df.loc[submit_times_df['public_test_used_times'].idxmin()]
         print(random.choice(REPORT_CORPUS["SUBMISSION"]["MOST"]).format(hw_name=most_submitted['name'], count=int(most_submitted['public_test_used_times'])))
         print(random.choice(REPORT_CORPUS["SUBMISSION"]["LEAST"]).format(hw_name=least_submitted['name'], count=int(least_submitted['public_test_used_times'])))
-    
+
     ddl_risk_df = df[(df['ddl_index'] > 0.9) & ((df['strong_test_deduction_count'] > 0) | (df['hacked_success'] > 0))]
     if len(ddl_risk_df) > len(df) * 0.1:
         print(random.choice(REPORT_CORPUS["ANALYSIS"]["DDL"]))
@@ -799,8 +967,7 @@ def generate_dynamic_report(df, user_name, config):
         print(random.choice(REPORT_CORPUS["HACK_STRATEGY"]["INTRO"]))
         for text in hack_strategy_texts:
             print(text)
-    
-     # --- [V9.0 新增] 房间生态分析模块 ---
+
     peace_room_text_generated = False
     for _, hw in df.iterrows():
         if hw.get('room_total_hack_success', 99) == 0 and hw.get('room_total_hack_attempts', 0) > 50:
@@ -827,17 +994,57 @@ def generate_dynamic_report(df, user_name, config):
             if pd.notna(hw.get('room_avg_hacked')):
                  hack_info += f" (房均被Hack: {hw.get('room_avg_hacked', 0):.2f})"
             print(f"  - 互测: 在 {hw.get('room_level', '?')} 房化身「{hw.get('alias_name', '?')}」，{hack_info}")
-        
+
         if hw['unit'].startswith("第四单元"):
             print(format_uml_analysis(hw))
-            
+
         print(f"  - 提交: {analyze_submission_style(hw)}")
+
+    # --- [新功能] 成就墙 (V2.0 新版格式) ---
+    print("\n" + "--- 8. 个人成就墙 ---".center(70))
+
+    all_achievements_data = REPORT_CORPUS["HIGHLIGHTS"]["TAGS"]
+    total_achievements = len(all_achievements_data)
+    completed_achievements = len(earned_highlight_keys)
+    
+    print(f"成就进度：{completed_achievements} / {total_achievements}")
+
+    unlocked_list = []
+    locked_list = []
+
+    for key, data in all_achievements_data.items():
+        if key in earned_highlight_keys:
+            unlocked_list.append((key, data))
+        else:
+            locked_list.append((key, data))
+
+    # 按名称排序
+    unlocked_list.sort(key=lambda x: x[1]['name'])
+    locked_list.sort(key=lambda x: x[1]['name'])
+    
+    # 打印已解锁成就
+    if unlocked_list:
+        print("\n--- ✅ 已解锁成就 ---")
+        for key, data in unlocked_list:
+            icon = data.get('icon', '❓')
+            name = data.get('name', '未知成就')
+            context_info = earned_achievements_details[key].get('context', '')
+            print(f"  {icon} {name} (达成于: {context_info.strip()})")
+
+    # 打印未解锁成就
+    if locked_list:
+        print("\n--- 🔒 未解锁成就 ---")
+        for key, data in locked_list:
+            icon = data.get('icon', '❓')
+            name = data.get('name', '未知成就')
+            condition = data.get('condition', '未知条件')
+            print(f"  {icon} {name} - {condition}")
+
 
     print("\n" + "="*80)
     print(" 学期旅程总结 ".center(80, "="))
     print("="*80)
     print(random.choice(REPORT_CORPUS["CONCLUSION"]))
-
 # --- 7. 主执行逻辑 ---
 def main():
     try:

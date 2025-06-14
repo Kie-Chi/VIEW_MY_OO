@@ -39,28 +39,222 @@
             "在海量的代码与提交记录中，我们捕捉到了你独有的闪光点。请看你的高光时刻集锦："
         ],
         "TAGS": {
-            "TOP_SCORER": "  - 🏆 学霸本色: 你的强测平均分高达{avg_score:.2f}，位列顶尖水平，展现了强大的硬实力。",
-            "ROCK_SOLID": "  - 💎 稳如磐石: 整个学期，你的强测最低分仍高达 {min_score:.2f}，且几乎未在互测中失守。代码质量稳定得令人惊叹！",
-            "DEFENSE_MASTER": "  - 🛡️ 防御大师: 你的代码在超过75%的互测中保持零失误，堪称固若金汤。",
-            "HACK_ARTIST": "  - ⚔️ 机会主义黑客: 在「{hw_name}」中，你敏锐地抓住机会，发起了{count}次成功Hack，一战成名。",
-            "JML_MASTER": "  - 📜 JML大师: 在第三单元，你完美地驾驭了JML规格，所有相关作业均取得近乎满分的成绩，展现了对形式化设计的深刻理解。",
-            "UML_EXPERT": "  - 🗺️ UML专家: 在第四单元，你精确地解析了所有UML模型，所有检查点均完美通过，展现了对复杂模型无与伦比的洞察力。",
-            "EFFICIENCY_ACE": "  - ⚡ 效率奇才: 在「{hw_name}」等多次任务中，你以极少的提交次数一次通过，展现了卓越的开发效率。",
-            "FAST_STARTER": "  - 🚀 开局冲刺手: 在「{hw_name}」等多次作业中，你都在早期就完成了首次提交，展现了极强的学习主动性和规划能力。",
-            "DEADLINE_COMEBACK": "  - ⏰ DDL逆袭者: 在「{hw_name}」等任务中，你数次在最终时刻力挽狂澜，提交的代码依然取得了优良成绩，展现了非凡的抗压能力。",
-            "COMEBACK_KING": "  - 📈 王者归来: 从学期初的{u1_score:.1f}分到学期末的{u4_score:.1f}分，你的平均分实现了显著提升，展现了惊人的学习能力和后劲。",
-            "REFACTOR_VIRTUOSO": "  - 🏗️ 架构迭代大师: 在「{unit_name}」中，你通过果断的迭代，实现了从「{hw_name_before}」到「{hw_name_after}」的飞跃，展现了卓越的架构演进能力。",
-            "BUG_FIXER_PRO": "  - 🔧 漏洞修复专家: 对于学期中被发现的所有Bug，你都成功修复，体现了极致的开发者责任感。",
-            "PERFORMANCE_CHALLENGER": "  - 💨 并发挑战者: 你在第二单元虽然遇到了性能挑战，但最终成功克服，展现了强大的调试和优化能力。",
-            "THE_PERSEVERER": "  - 🌱 坚韧不拔: 即使在「{low_score_hw}」遇到挫折，你依然坚持不懈，并在「{rebound_hw}」中取得了显著进步，这份毅力比分数更宝贵！",
-            "DILIGENT_EXPLORER": "  - 🧗 勤奋的探索者: 本学期你累计提交了 {total_submissions} 次代码。每一次提交都是一次宝贵的探索，记录了你攀登技术高峰的足迹。",
-            "ACTIVE_COLLABORATOR": "  - 🤝 积极的协作者: 在「{hw_name}」的互测中，你发起了 {hack_attempts} 次测试，积极参与到社区协作中。发现他人bug与修复自身bug同样是学习的重要一环。",
-            "FOUNDATION_BUILDER": "  - 🧱 坚实奠基者: 你坚持完成了本学期的每一次作业，即使面对「{hw_name}」这样的挑战也未曾放弃。每一次提交都是在为未来的技术大厦添砖加瓦，这份坚持难能可贵。",
-            "PRECISION_STRIKER": "  - 🎯 精准打击者: 在「{hw_name}」中，你的Hack成功率高达{rate:.0f}%，展现了你构造高效测试用例的非凡能力。",
-            "TACTICAL_MASTER": "  - ♟️ 战术大师: 你在「{hw_name}」的互测中展现了清晰的战术思路，集中火力成功攻破了{target_count}名同学的防线。",
-            "STORM_SURVIVOR": "  - 🌊 风暴幸存者: 在「{hw_name}」这场被Hack总数高达{room_total_hacked}次的“腥风血雨”中，你仅被攻破{self_hacked}次，展现了超凡的生存能力。",
-            "IRON_WALL_SQUAD": "  - 🏅 铁壁小队成员: 你所在的「{hw_name}」A房上演了史诗级的防御战！在全房超过 {total_attacks} 次的密集火力下，无一人被攻破。作为这支‘铁壁小队’的一员，你的代码与其他成员共同铸就了这道无法逾越的防线，这份集体荣誉含金量极高！",
-            "PLANNING_MASTER": "  - 🎓 规划大师: 在「{hw_name}」中，你不仅在截止前数日就完成了首次提交，并且仅用 {count} 次提交就产出了强测满分、互测零失误的完美代码。这展现了你对需求的深刻理解、清晰的架构设计和卓越的规划能力，堪称‘一次成型’的典范。"
+            "TOP_SCORER": {
+                "icon": "🏆",
+                "name": "学霸本色",
+                "description": "  - 🏆 学霸本色: 你的强测平均分高达{avg_score:.2f}，位列顶尖水平，展现了强大的硬实力。",
+                "condition": "强测平均分 > 98.5"
+            },
+            "ROCK_SOLID": {
+                "icon": "💎",
+                "name": "稳如磐石",
+                "description": "  - 💎 稳如磐石: 整个学期，你的强测最低分仍高达 {min_score:.2f}，且几乎未在互测中失守。代码质量稳定得令人惊叹！",
+                "condition": "强测最低分 > 95 且 互测被Hack总次数 <= 1"
+            },
+            "DEFENSE_MASTER": {
+                "icon": "🛡️",
+                "name": "防御大师",
+                "description": "  - 🛡️ 防御大师: 你的代码在超过75%的互测中保持零失误，堪称固若金汤。",
+                "condition": "超过75%的互测中未被成功Hack"
+            },
+            "HACK_ARTIST": {
+                "icon": "⚔️",
+                "name": "机会主义黑客",
+                "description": "  - ⚔️ 机会主义黑客: 在「{hw_name}」中，你敏锐地抓住机会，发起了{count}次成功Hack，一战成名。",
+                "condition": "单次作业成功Hack次数 >= 10"
+            },
+            "JML_MASTER": {
+                "icon": "📜",
+                "name": "JML大师",
+                "description": "  - 📜 JML大师: 在第三单元，你完美地驾驭了JML规格，所有相关作业均取得近乎满分的成绩，展现了对形式化设计的深刻理解。",
+                "condition": "第三单元所有作业强测 > 99 且 被Hack总次数为0"
+            },
+            "UML_EXPERT": {
+                "icon": "🗺️",
+                "name": "UML专家",
+                "description": "  - 🗺️ UML专家: 在第四单元，你精确地解析了所有UML模型，所有检查点均完美通过，展现了对复杂模型无与伦比的洞察力。",
+                "condition": "第四单元所有作业强测满分且UML检查点全通过"
+            },
+            "EFFICIENCY_ACE": {
+                "icon": "⚡",
+                "name": "效率奇才",
+                "description": "  - ⚡ 效率奇才: 在「{hw_name}」等多次任务中，你以极少的提交次数一次通过，展现了卓越的开发效率。",
+                "condition": "单次作业提交次数 <= 2 次"
+            },
+            "FAST_STARTER": {
+                "icon": "🚀",
+                "name": "开局冲刺手",
+                "description": "  - 🚀 开局冲刺手: 在「{hw_name}」等多次作业中，你都在早期就完成了首次提交，展现了极强的学习主动性和规划能力。",
+                "condition": "至少3次作业在开始24小时内提交 (DDL指数 < 0.1)"
+            },
+            "DEADLINE_COMEBACK": {
+                "icon": "⏰",
+                "name": "DDL逆袭者",
+                "description": "  - ⏰ DDL逆袭者: 在「{hw_name}」等任务中，你数次在最终时刻力挽狂澜，提交的代码依然取得了优良成绩，展现了非凡的抗压能力。",
+                "condition": "至少2次在DDL前提交 (DDL指数 > 0.9) 且强测 > 85"
+            },
+            "COMEBACK_KING": {
+                "icon": "📈",
+                "name": "王者归来",
+                "description": "  - 📈 王者归来: 从学期初的{u1_score:.1f}分到学期末的{u4_score:.1f}分，你的平均分实现了显著提升，展现了惊人的学习能力和后劲。",
+                "condition": "第四单元平均分 > 第一单元平均分 + 2"
+            },
+            "REFACTOR_VIRTUOSO": {
+                "icon": "🏗️",
+                "name": "架构迭代大师",
+                "description": "  - 🏗️ 架构迭代大师: 在「{unit_name}」中，你通过果断的迭代，实现了从「{hw_name_before}」到「{hw_name_after}」的飞跃，展现了卓越的架构演进能力。",
+                "condition": "单元内作业成绩提升超过10分且最终 > 95"
+            },
+            "BUG_FIXER_PRO": {
+                "icon": "🔧",
+                "name": "漏洞修复专家",
+                "description": "  - 🔧 漏洞修复专家: 对于学期中被发现的所有Bug，你都成功修复，体现了极致的开发者责任感。",
+                "condition": "所有被发现的Bug均被修复 (修复率100%)"
+            },
+            "PERFORMANCE_CHALLENGER": {
+                "icon": "💨",
+                "name": "并发挑战者",
+                "description": "  - 💨 并发挑战者: 你在第二单元虽然遇到了性能挑战，但最终成功克服，展现了强大的调试和优化能力。",
+                "condition": "第二单元曾遇性能问题但最终平均分 > 95"
+            },
+            "THE_PERSEVERER": {
+                "icon": "🌱",
+                "name": "坚韧不拔",
+                "description": "  - 🌱 坚韧不拔: 即使在「{low_score_hw}」遇到挫折，你依然坚持不懈，并在「{rebound_hw}」中取得了显著进步，这份毅力比分数更宝贵！",
+                "condition": "某次作业<80分后，下次作业分数提升>15分"
+            },
+            "DILIGENT_EXPLORER": {
+                "icon": "🧗",
+                "name": "勤奋的探索者",
+                "description": "  - 🧗 勤奋的探索者: 本学期你累计提交了 {total_submissions} 次代码。每一次提交都是一次宝贵的探索，记录了你攀登技术高峰的足迹。",
+                "condition": "学期总提交次数 > 30"
+            },
+            "ACTIVE_COLLABORATOR": {
+                "icon": "🤝",
+                "name": "积极的协作者",
+                "description": "  - 🤝 积极的协作者: 在「{hw_name}」的互测中，你发起了 {hack_attempts} 次测试，积极参与到社区协作中。发现他人bug与修复自身bug同样是学习的重要一环。",
+                "condition": "单次作业Hack尝试次数 > 10"
+            },
+            "FOUNDATION_BUILDER": {
+                "icon": "🧱",
+                "name": "坚实奠基者",
+                "description": "  - 🧱 坚实奠基者: 你坚持完成了本学期的每一次作业，即使面对「{hw_name}」这样的挑战也未曾放弃。每一次提交都是在为未来的技术大厦添砖加瓦，这份坚持难能可贵。",
+                "condition": "平均分 < 75但完成 > 10次作业"
+            },
+            "PRECISION_STRIKER": {
+                "icon": "🎯",
+                "name": "精准打击者",
+                "description": "  - 🎯 精准打击者: 在「{hw_name}」中，你的测试数据展现了惊人的杀伤力，有效打击率高达{rate:.1f}%，证明了你构造高效测试用例的非凡能力。",
+                "condition": "单次作业的Hack有效打击率 > 8%"
+            },
+            "TACTICAL_MASTER": {
+                "icon": "♟️",
+                "name": "战术大师",
+                "description": "  - ♟️ 战术大师: 在「{hw_name}」中，你展现了清晰的战术思路，集中火力对 {target_count} 名同学进行了 {hack_count} 次成功打击，说明你已洞悉其代码的特定弱点。",
+                "condition": "成功Hack > 3次，且 (成功Hack数 / 目标数) > 1.5"
+            },
+            "STORM_SURVIVOR": {
+                "icon": "🌊",
+                "name": "风暴幸存者",
+                "description": "  - 🌊 风暴幸存者: 在「{hw_name}」这场被Hack总数高达{room_total_hacked}次的“腥风血雨”中，你仅被攻破{self_hacked}次，展现了超凡的生存能力。",
+                "condition": "房间总被Hack > 20次，自己被Hack <= 1次"
+            },
+            "IRON_WALL_SQUAD": {
+                "icon": "🏅",
+                "name": "铁壁小队成员",
+                "description": "  - 🏅 铁壁小队成员: 你所在的「{hw_name}」A房上演了史诗级的防御战！在全房超过 {total_attacks} 次的密集火力下，无一人被攻破。作为这支‘铁壁小队’的一员，你的代码与其他成员共同铸就了这道无法逾越的防线，这份集体荣誉含金量极高！",
+                "condition": "所在房间总攻击 > 50次 且 房间总成功被Hack为0"
+            },
+            "PLANNING_MASTER": {
+                "icon": "🎓",
+                "name": "规划大师",
+                "description": "  - 🎓 规划大师: 在「{hw_name}」中，你不仅在截止前数日就完成了首次提交，并且仅用 {count} 次提交就产出了强测满分、互测零失误的完美代码。这展现了你对需求的深刻理解、清晰的架构设计和卓越的规划能力，堪称‘一次成型’的典范。",
+                "condition": "DDL指数<0.3，提交<=2次，强测满分，互测0失误"
+            },
+            "DECORATED_DEVELOPER": {
+                "icon": "🌟",
+                "name": "荣誉等身",
+                "description": "  - 🌟 荣誉等身: 你已解锁超过5个个人亮点，证明了你在多个维度上的卓越表现与全面发展！",
+                "condition": "解锁超过5个其他成就"
+            },
+            "COLLECTION": {
+                "icon": "🎁",
+                "name": "OO收藏家",
+                "description": "  - 🎁 OO收藏家: 恭喜！在OO课程的学习中，你致力于收集所有可能的成就，堪称收藏家的典范！",
+                "condition": "解锁 80% 以上其他成就"
+            },
+            "EXPRESSION_GURU": {
+                "icon": "🧮",
+                "name": "表达式大师",
+                "description": "  - 🧮 表达式大师: 你在第一单元（表达式求导）中展现了卓越的实力，不仅强测平均分极高，且在互测中极少被攻破，完美驾驭了复杂的递归下降与化简。",
+                "condition": "第一单元强测平均分 > 98 且 互测被Hack总次数为0"
+            },
+            "CONCURRENCY_CONDUCTOR": {
+                "icon": "🚦",
+                "name": "并发指挥家",
+                "description": "  - 🚦 并发指挥家: 你在第二单元（多线程电梯）中表现出色，成功驾驭了多线程的复杂性，在保证较高强测分数的同时，有效避免了死锁等并发陷阱。",
+                "condition": "第二单元强测平均分 > 95 且 互测被Hack总次数 <= 1"
+            },
+            "FIRST_BLOOD": {
+                "icon": "🩸",
+                "name": "第一滴血",
+                "description": "  - 🩸 第一滴血: 在「{hw_name}」的互测中，你率先发起了全场第一次成功打击，抢占了先机！",
+                "condition": "成为房间内第一个成功Hack的人"
+            },
+            "BUZZER_BEATER": {
+                "icon": "⌛",
+                "name": "压哨绝杀",
+                "description": "  - ⌛ 压哨绝杀: 在「{hw_name}」的互测中，你在窗口关闭前的最后一刻完成致命一击，展现了永不言弃的竞技精神！",
+                "condition": "在互测结束前1小时内成功Hack"
+            },
+            "CHAIN_REACTION": {
+                "icon": "💥",
+                "name": "连锁反应",
+                "description": "  - 💥 连锁反应: 你在「{hw_name}」中提交的一份数据引发了“连锁反应”，一次性击破了 {count} 名同学的防线！",
+                "condition": "单次提交成功Hack超过3人"
+            },
+            "NEMESIS": {
+                "icon": "⚔️",
+                "name": "宿敌",
+                "description": "  - ⚔️ 宿敌: 在本学期的对决中，有一位同学成为了你的“宿敌”，你曾 {count} 次洞悉其代码的弱点并成功突破！",
+                "condition": "整个学期中成功Hack同一个人超过3次"
+            },
+            "COUNTER_ATTACK": {
+                "icon": "💪",
+                "name": "反戈一击",
+                "description": "  - 💪 反戈一击: 在「{hw_name}」中，即使先遭打击，你也能迅速调整状态并成功反击，展现了强大的韧性。",
+                "condition": "在被别人成功Hack后，又成功Hack了别人"
+            },
+            "ANNIHILATION": {
+                "icon": "☠️",
+                "name": "团灭",
+                "description": "  - ☠️ 团灭: 在「{hw_name}」的对局中，你以一己之力横扫全场，成功打击了房间内的所有对手，达成“团灭”成就！",
+                "condition": "单次作业中成功Hack房间内所有其他同学"
+            },
+            "PHOENIX_REBIRTH": {
+                "icon": "🔥",
+                "name": "浴火重生",
+                "description": "  - 🔥 浴火重生: 在「{hw_name}」的腥风血雨中，即使遭遇打击，你的核心架构依然坚不可摧，最终在强测中取得高分，浴火重生！",
+                "condition": "在被多次Hack的作业中，依然取得很高的强测分数"
+            },
+            "CODE_ARTISAN": {
+                "icon": "🎨",
+                "name": "代码艺术家",
+                "description": "  - 🎨 代码艺术家: 你对代码美学有着极致追求，整个学期的代码风格检查均获得满分，堪称优雅的典范。",
+                "condition": "所有作业的代码风格检查均为满分"
+            },
+            "ICE_BREAKER": {
+                "icon": "🧊",
+                "name": "破冰者",
+                "description": "  - 🧊 破冰者: 在「{hw_name}」这场寂静的对局中，你以一己之力打破僵局，贡献了全场绝大部分的有效打击！",
+                "condition": "在低活跃度的互测房中，贡献了80%以上的成功Hack"
+            },
+            "SCORE_ACTUARY": {
+                "icon": "⚖️",
+                "name": "得分精算师",
+                "description": "  - ⚖️ 得分精算师: 你对得分规则了如指掌，整个学期在Bug修复阶段的攻防得分几乎完全平衡，堪称精算大师。",
+                "condition": "整个学期的Bug修复攻防得分比接近1:1"
+            }
         },
         "CATEGORIES": {
             "TOP_SCORER": "卓越表现",
@@ -84,7 +278,19 @@
             "PRECISION_STRIKER": "博弈高手",
             "TACTICAL_MASTER": "博弈高手",
             "IRON_WALL_SQUAD": "卓越表现",
-            "PLANNING_MASTER": "高效策略"
+            "PLANNING_MASTER": "高效策略",
+            "DECORATED_DEVELOPER": "卓越表现",
+            "COLLECTION": "卓越表现",
+            "FIRST_BLOOD": "卓越表现",
+            "BUZZER_BEATER": "高效策略",
+            "CHAIN_REACTION": "博弈高手",
+            "NEMESIS": "博弈高手",
+            "COUNTER_ATTACK": "成长态度",
+            "ANNIHILATION": "卓越表现",
+            "PHOENIX_REBIRTH": "成长态度",
+            "CODE_ARTISAN": "卓越表现",
+            "ICE_BREAKER": "博弈高手",
+            "SCORE_ACTUARY": "博弈高手"
         }
     },
     "ANALYSIS": {
@@ -311,6 +517,10 @@
             "EARLY_BIRD": "你是一位典型的“闪电战”选手，习惯在互测开始后的“黄金一小时”内迅速发起攻势，抢占先机。",
             "DEADLINE_SNIPER": "你更像一位“狙击手”，倾向于在互测临近结束时出手，此刻往往能发现一些他人忽略的漏洞。",
             "CONSISTENT_PRESSURE": "你的攻击分布在整个互测周期，通过持续的压力测试寻找对手的薄弱环节，策略稳健而有效。"
+        },
+        "EFFECTIVENESS": {
+            "HIGH_EFFICIENCY": "从效果上看，你的测试数据堪称“弹无虚发”。学期平均有效打击率较高，说明你总能敏锐地构造出直击要害的测试用例。",
+            "PERSISTENT_EFFORT": "从效果上看，你的成功主要源于“不懈的努力”。虽然单次打击率不高，但通过持续提交和测试，你最终还是找到了对手的破绽，这种毅力同样值得称道。"
         },
         "TARGETING": {
             "FOCUSED_FIRE": "你的攻击策略倾向于“集中火力”，一旦发现某个对手的潜在弱点，便会进行深入和持续的测试。",

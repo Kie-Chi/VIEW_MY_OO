@@ -266,10 +266,10 @@ def parse_forum_data(raw_data, config, df):
         
         post_data = item.get("body", {}).get("data", {})
         post = post_data.get('post')
-        if not post or not post.get('homework'):
+        if not post or not post_data.get('homework'):
             continue
             
-        hw_name = post['homework']['name']
+        hw_name = post_data['homework']['name']
         hw_num = get_hw_number(hw_name, config)
         if hw_num not in forum_activities:
             continue
@@ -288,8 +288,11 @@ def parse_forum_data(raw_data, config, df):
         comments = post_data.get('comments', [])
         for comment in comments:
             if comment.get('user_name') == user_name:
-                # 检查是否为“严谨求索者”（回复官方置顶帖）
-                if priority == 'top' and category == 'issue' and author in official_authors:
+                # print("yes it has")
+                # import pprint
+                # pprint.pprint(comment)
+                # 只要是回复官方发布的置顶帖，即视为“严谨求索”
+                if priority == 'top' and author in official_authors:
                     forum_activities[hw_num]['official_replies'] += 1
                 
                 # 检查是否为“互助典范”（在同学的求助帖下回复）
@@ -616,20 +619,36 @@ def generate_highlights(df, config):
     # earned_achievements 将存储解锁的成就及其详细信息
     # 格式: {'KEY': {'description': '...', 'context': '于 ...'}}
     earned_achievements = {}
-    mutual_df = df[df.get('has_mutual_test', pd.Series(True))].dropna(subset=['hack_success', 'hacked_success', 'room_level'])
+    df_with_mutual_opportunities = df[df['has_mutual_test'] == True]
+    total_mutual_opportunities = len(df_with_mutual_opportunities)
+
+    # 2. 筛选出学生实际进入了互测房间的作业 (用于计算分子)
+    mutual_df = df_with_mutual_opportunities.dropna(subset=['room_level'])
+    
+    # 3. 计算比率，使用正确的分母
+    a_rate, b_rate, c_rate = 0, 0, 0
+    if total_mutual_opportunities > 0:
+        # 分子：从实际进入的房间中统计 A、B、C 各有多少次
+        room_counts = mutual_df['room_level'].value_counts()
+        
+        # 分母：使用总的互测机会次数
+        a_rate = room_counts.get('A', 0) / total_mutual_opportunities
+        b_rate = room_counts.get('B', 0) / total_mutual_opportunities
+        c_rate = room_counts.get('C', 0) / total_mutual_opportunities
+
     total_hacks = mutual_df['hack_success'].sum()
     total_hacked = mutual_df['hacked_success'].sum()
 
     # 论坛活动统计
     total_forum_activity = df['essential_posts_authored'].sum() + df['official_replies'].sum() + df['peer_assists'].sum()
     
-    # 房间等级统计
-    if not mutual_df.empty:
+    # 3. [修改] 房间等级统计，使用正确的基数
+    a_rate, b_rate, c_rate = 0, 0, 0
+    if total_mutual_opportunities > 0:
         room_counts = mutual_df['room_level'].value_counts()
-        total_rooms = len(mutual_df)
-        a_rate = room_counts.get('A', 0) / total_rooms
-        b_rate = room_counts.get('B', 0) / total_rooms
-        c_rate = room_counts.get('C', 0) / total_rooms
+        a_rate = room_counts.get('A', 0) / total_mutual_opportunities # 使用总机会数作为分母
+        b_rate = room_counts.get('B', 0) / total_mutual_opportunities # 使用总机会数作为分母
+        c_rate = room_counts.get('C', 0) / total_mutual_opportunities # 使用总机会数作为分母
 
     def add_highlight(key, context_str, **kwargs):
         """辅助函数，添加成就并记录其描述和上下文。"""
@@ -644,8 +663,29 @@ def generate_highlights(df, config):
     submit_times_df = df.dropna(subset=['public_test_used_times'])
 
     # --- 1. 基础成就检查 (为每个成就添加 context_str) ---
+    # “千刀狼王”成就判断逻辑
+    # 1. 计算整个学期的总Hack尝试次数和总成功次数
+    total_hacks_attempted = df['hack_total_attempts'].sum()
+    total_hacks_successful = df['hack_success'].sum()
+    
+    # 2. 避免除以零，并计算成功率
+    if total_hacks_attempted > 0:
+        success_rate = (total_hacks_successful / total_hacks_attempted) * 100
+        
+        # 3. 设置阈值并判断是否满足条件
+        #    - 总攻击次数 > 200 (可自行调整)
+        #    - 成功率 > 5% (可自行调整)
+        if total_hacks_attempted > 500 and success_rate > 5:
+            # 4. 如果满足条件，则添加这个成就
+            add_highlight(
+                "THOUSAND_BLADE_WOLF_KING",  # 使用在corpus.json中定义的Key
+                "于 整个学期",             # 成就上下文
+                total_attempts=int(total_hacks_attempted),
+                total_hacks=int(total_hacks_successful),
+                rate=success_rate
+            )
     # 王座常客
-    if not mutual_df.empty and a_rate > 0.75:
+    if total_mutual_opportunities > 0 and a_rate >= 0.75: # 使用修正后的 a_rate
         add_highlight("A_ROOM_REGULAR", "于 整个学期")
 
     # 玻璃大炮
@@ -658,7 +698,7 @@ def generate_highlights(df, config):
         add_highlight("LONE_SWORDSMAN", "于 整个学期")
 
     # 过山车玩家
-    if not mutual_df.empty and total_rooms > 2 and max(a_rate, b_rate, c_rate) < 0.6:
+    if total_mutual_opportunities > 2 and max(a_rate, b_rate, c_rate) < 0.6:
         add_highlight("ROLLER_COASTER_RIDER", "于 整个学期")
 
     # 沉默是金
@@ -1049,8 +1089,27 @@ def _analyze_overall_performance(df):
         total_hacks = mutual_df['hack_success'].sum()
         total_hacked = mutual_df['hacked_success'].sum()
         total_hacked_attempts = mutual_df['hacked_total_attempts'].sum()
+        total_hacks_attempted = mutual_df['hack_total_attempts'].sum()
         
-        analysis_texts.append(f"\n互测战绩: 成功Hack {int(total_hacks)} 次 | 被成功Hack {int(total_hacked)} 次 (总计被攻击 {int(total_hacked_attempts)} 次)")
+        analysis_texts.append(f"\n互测战绩: 发起攻击 {int(total_hacks_attempted)} 次 (成功 {int(total_hacks)}) | 被攻击 {int(total_hacked_attempts)} 次 (被成功Hack {int(total_hacked)})")
+
+        if total_hacks_attempted > 0:
+            rate = (total_hacks / total_hacks_attempted) * 100
+            # 设置高攻击次数的阈值，例如100次
+            if total_hacks_attempted > 100:
+                # 设置高效率的阈值，例如8%
+                if rate > 8:
+                    analysis_texts.append(random.choice(REPORT_CORPUS["MUTUAL_TEST"]["ATTACK_STYLE"]["PROLIFIC_ATTACKER"]).format(
+                        attempts=int(total_hacks_attempted), rate=rate
+                    ))
+                else:
+                    analysis_texts.append(random.choice(REPORT_CORPUS["MUTUAL_TEST"]["ATTACK_STYLE"]["PERSISTENT_ATTACKER"]).format(
+                        attempts=int(total_hacks_attempted), successes=int(total_hacks)
+                    ))
+            else: # 攻击次数不多
+                analysis_texts.append(random.choice(REPORT_CORPUS["MUTUAL_TEST"]["ATTACK_STYLE"]["SELECTIVE_ATTACKER"]).format(
+                    attempts=int(total_hacks_attempted)
+                ))
 
         profile_found = False
         if total_hacks > total_hacked * 2 and total_hacks >= 10:

@@ -64,7 +64,7 @@ async def handle_course(response: Response):
     if COURSE in response.url:
         try:
             json_body = await response.json()
-            courses.append({
+            _append(courses, {
                 "url": response.url,
                 "status": response.status,
                 "body": json_body,
@@ -78,7 +78,7 @@ async def handle_post_pages(response: Response):
     if re.match(POSTS, response.url):
         try:
             json_body = await response.json()
-            post_pages.append({
+            _append(post_pages, {
                 "url": response.url,
                 "status": response.status,
                 "body": json_body,
@@ -93,8 +93,8 @@ async def handle_posts(response: Response):
         try:
             json_body = await response.json()
             # 去除不必要的内容
-            json_body["data"]["post"]["content"] = json_body["data"]["post"]["content"][:100]
-            posts.append({
+            json_body["data"]["post"]["content"] = json_body["data"]["post"]["content"][:30]
+            _append(posts, {
                 "url": response.url,
                 "status": response.status,
                 "body": json_body,
@@ -108,7 +108,7 @@ async def handle_homeworks(response: Response):
     if re.match(GITLAB, response.url):
         try:
             json_body = await response.json()
-            homeworks.append({
+            _append(homeworks, {
                 "url": response.url,
                 "status": response.status,
                 "body": json_body,
@@ -170,13 +170,19 @@ async def get_all_posts(context:playwright.async_api.BrowserContext, course_id:i
     try:
         pprint.pprint(post_pages)
         index = 1
-        max_pages = post_pages[0]["body"]["data"]["total_page"]
+        the_pages = []
+        for i in range(len(post_pages)):
+            if str(course_id) in post_pages[i]["url"]:
+                the_pages.append(post_pages[i])
+            
+        max_pages = the_pages[0]["body"]["data"]["total_page"]
         ids = []
         while index <= max_pages:
-            total_cnt = post_pages[index - 1]["body"]["data"]["total_count"]
-            ids.extend([post_pages[index - 1]["body"]["data"]["posts"][i]["id"] for i in range(total_cnt)])
+            total_cnt = the_pages[index - 1]["body"]["data"]["total_count"]
+            ids.extend([the_pages[index - 1]["body"]["data"]["posts"][i]["id"] for i in range(total_cnt)])
             index += 1
         print(f"[INFO] ids is {ids}")
+        await page.wait_for_timeout(1000)
         await page.close()
         post = f"{BASE_URL}/assignment/{course_id}/discussion"
         tasks = []
@@ -238,14 +244,27 @@ async def get_all_commits(context:playwright.async_api.BrowserContext, year:str,
     url = f"http://gitlab.oo.buaa.edu.cn/oo_homework_{year}/{hw}/-/commits"
     page = await load_page(context, None)
     await page.goto(url)
+    await page.wait_for_load_state("networkidle")
     _commits = await page.locator("li > div:nth-child(2) > div:nth-child(1) > a").all_inner_texts()
     links_locator = page.locator("li > div:nth-child(2) > div:nth-child(1) > div:nth-child(3) > time")
     _times = [await link.get_attribute("title") for link in await links_locator.all()]
     _all = {_times[i]: _commits[i] for i in range(len(_commits))}
     # pprint.pprint(_commits)
+    def _append(lists: list, element:any):
+        has = False
+        for e in lists:
+            if e['hw'] == element['hw']:
+                has = True
+                break
+        
+        if not has:
+            lists.append(element)
+            return True
+        return False
+    
     async with lock:
         true_hw = re.findall(r"oo_homework_\d+_\d+_.*?(\d+)", hw)[0]
-        commits.append(
+        _append(commits, 
             {
                 "hw": true_hw,
                 "commits": _all
@@ -291,10 +310,10 @@ async def main(_id, pwd):
             # await p.stop()
             def split_by_size(data, n):
                 return [data[i:i + n] for i in range(0, len(data), n)]
-            split = 4
+            split = 3
             tasks = [get_all_pages(context, course_ids[i]) for i in range(16) if i%4 !=3]
             all_tasks = split_by_size(tasks, split)
-            for i in range(split):
+            for i in range(len(all_tasks)):
                 try:
                     await asyncio.gather(*(all_tasks[i]))
                 except Exception as e:
@@ -302,7 +321,7 @@ async def main(_id, pwd):
                 
         except Exception as e:
             print(f"[ERROR] 页面导航或操作失败: {e}")
-
+        asyncio.sleep(3)
         try:
             print("[INFO] scrape for gitlab")
             page = await context.new_page()
@@ -328,7 +347,7 @@ async def main(_id, pwd):
         import json
         captured_responses.extend(posts)
         captured_responses.extend(commits)
-        # print(json.dumps(captured_responses, indent=2, ensure_ascii=False))
+        # print(json.dumps(posts, indent=2, ensure_ascii=False))
         json.dump(captured_responses, open("tmp.json", "w", encoding="utf-8"), ensure_ascii=False)
 
 

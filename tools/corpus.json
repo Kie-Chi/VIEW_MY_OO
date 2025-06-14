@@ -669,14 +669,14 @@
     "HW_DEV_PROCESS": {
         "CONNECTORS": {
             "SINGLE_MAIN": [
-                "- 代码指纹分析：{main_desc}的独特节奏贯穿开发始终",
-                "- 工程日志记载：{main_desc}构成项目的主要脉络",
-                "- 在版本控制的史诗中：{main_desc}是永不偏移的主线叙事"
+                "代码指纹分析：{main_desc}的独特节奏贯穿开发始终",
+                "工程日志记载：{main_desc}构成项目的主要脉络",
+                "在版本控制的史诗中：{main_desc}是永不偏移的主线叙事"
             ],
             "WITH_ADDITIONS": [
-                "- 核心模式：{main_desc}。星轨之外，尚有{additions}的璀璨群星",
-                "- 主旋律：{main_desc}。间奏中，{additions}如装饰音般点睛",
-                "- 主干生长：{main_desc}。年轮间隙，{additions}如树脂凝成琥珀"
+                "核心模式：{main_desc}。星轨之外，尚有{additions}的璀璨群星",
+                "主旋律：{main_desc}。间奏中，{additions}如装饰音般点睛",
+                "主干生长：{main_desc}。年轮间隙，{additions}如树脂凝成琥珀"
             ]
         },
         "PROCESS_REFACTORING": [

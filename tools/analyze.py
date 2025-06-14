@@ -1,5 +1,6 @@
 # analyze.py
 
+from datetime import timedelta
 import json
 import re
 import dateutil
@@ -330,6 +331,11 @@ def parse_commit_data(raw_data, config):
                     try:
                         # 使用 dateutil.parser 灵活处理各种时间戳格式
                         timestamp = dateutil.parser.parse(timestamp_str)
+                        if timestamp.tzinfo is not None:
+                            # 如果有时区，先将其统一转换为 UTC 时区
+                            timestamp = timestamp.astimezone(dateutil.tz.UTC)
+                            
+                        timestamp = timestamp.replace(tzinfo=None)
                         commit_list.append({'timestamp': timestamp, 'message': message})
                     except (dateutil.parser.ParserError, TypeError):
                         print(f"警告: 无法解析作业 {hw_num} 的 commit 时间戳: {timestamp_str}")
@@ -455,7 +461,7 @@ def preprocess_and_calculate_metrics(df):
 
     def get_development_style_tags(row):
         tags = []
-        if row['commit_count'] < 3:
+        if row['commit_count'] < 1:
             return tags
         # 1. 启动与节奏风格 (选择一个最主要的)
         if row['start_ratio'] < 0.2:
@@ -1400,7 +1406,7 @@ def generate_dynamic_report(df, user_name, config):
 
         if hw['unit'].startswith("第四单元"):
             print(format_uml_analysis(hw))
-        print(format_development_process_for_hw(hw))
+        print(f"  - {format_development_process_for_hw(hw)}")
         if pd.notna(hw['ddl_index']):
             ddl_index = hw['ddl_index']
             if ddl_index > 0.9:
@@ -1459,6 +1465,35 @@ def generate_dynamic_report(df, user_name, config):
     print(" 学期旅程总结 ".center(80, "="))
     print("="*80)
     print(random.choice(REPORT_CORPUS["CONCLUSION"]))
+
+def filter_commits_by_homework_timeline(df):
+    dt_cols = ['public_test_start_time', 'public_test_end_time']
+    for col in dt_cols:
+        if col in df.columns:
+            # errors='coerce' 会将无法解析的日期变为 NaT (Not a Time)
+            # utc=True, tz_localize(None) 是为了和 commit 时间戳的格式保持一致（无时区信息的UTC时间）
+            df[col] = pd.to_datetime(df[col], errors='coerce', utc=True)
+            df[col] = df[col].dt.tz_localize(None)
+
+    # 定义一个内部函数，用于处理 DataFrame 的每一行
+    def filter_row_commits(row):
+        start_time = row['public_test_start_time']
+        end_time = row['public_test_end_time']
+        commits = row['commits']
+
+        # 如果起止时间无效或 commit 列表为空，则直接返回空列表，避免错误
+        if pd.isna(start_time) or pd.isna(end_time) or not commits:
+            return []
+        release_time = start_time - timedelta(days=3)
+        filtered_commits = [
+            c for c in commits 
+            if release_time <= c['timestamp'] <= end_time
+        ]
+        
+        return filtered_commits
+    df['commits'] = df.apply(filter_row_commits, axis=1)
+    return df
+
 # --- 7. 主执行逻辑 ---
 def main():
     try:
@@ -1489,9 +1524,10 @@ def main():
         # 2. 将数据合并到主DataFrame中
         raw_df = pd.DataFrame(homework_details)
         raw_df['commits'] = raw_df['hw_num'].map(commit_history).fillna('').apply(list) # 映射并填充
-        
+        df_filtered = filter_commits_by_homework_timeline(raw_df)
+
         # 3. 继续后续处理
-        df_metrics = preprocess_and_calculate_metrics(raw_df)
+        df_metrics = preprocess_and_calculate_metrics(df_filtered)
         df = parse_forum_data(raw_json_data, CONFIG, df_metrics) 
         
         user_display_name = CONFIG["USER_INFO"].get("real_name")

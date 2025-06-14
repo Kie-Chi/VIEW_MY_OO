@@ -7,8 +7,8 @@ from pathlib import Path
 
 # --- Configuration ---
 CONFIG_FILE = "config.yml"
-CAPTURE_SCRIPT = "capture.py"
-ANALYZE_SCRIPT = "analyze.py"
+CAPTURE_SCRIPT = os.path.join("tools", "capture.py")
+ANALYZE_SCRIPT = os.path.join("tools", "analyze.py")
 
 # --- Main Logic ---
 
@@ -99,7 +99,8 @@ def run_analysis(student_id):
     except subprocess.CalledProcessError:
         print(f"❌ 错误: 分析脚本 '{ANALYZE_SCRIPT}' 执行失败。")
     finally:
-        os.remove(source_data_file)
+        # os.remove(source_data_file)
+        pass
 
 
 if __name__ == "__main__":

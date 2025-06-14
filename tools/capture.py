@@ -6,12 +6,14 @@ import time
 import playwright
 from playwright.async_api import async_playwright, Response
 import playwright.async_api
+import playwright.sync_api
 
 # 定义目标域名
 TARGET_DOMAIN = "api.oo.buaa.edu.cn/homework"
 COURSE = "api.oo.buaa.edu.cn/course"
 POSTS = r"^\w+://api\.oo\.buaa\.edu\.cn/homework/\d+/posts.*?$"
 POST = "api.oo.buaa.edu.cn/post"
+GITLAB = r"^\w+://gitlab\.oo\.buaa\.edu\.cn/groups/oo_homework_\d+/-/.*?$"
 BASE_URL = "http://oo.buaa.edu.cn"
 
 # 创建一个列表来存储捕获到的数据
@@ -19,6 +21,7 @@ captured_responses = []
 courses = []
 post_pages = []
 posts = []
+homeworks = []
 
 def _append(lists: list, element:any):
     has = False
@@ -101,14 +104,29 @@ async def handle_posts(response: Response):
             # 如果解析JSON失败，则作为文本读取
             print(f"  - 无法解析为 JSON，尝试读取文本...")
 
+async def handle_homeworks(response: Response):
+    if re.match(GITLAB, response.url):
+        try:
+            json_body = await response.json()
+            homeworks.append({
+                "url": response.url,
+                "status": response.status,
+                "body": json_body,
+            })
+        except Exception as e:
+            print(f"[ERROR] {e}")
+            # 如果解析JSON失败，则作为文本读取
+            print(f"  - 无法解析为 JSON，尝试读取文本...")
+
 
 async def load_page(context:playwright.async_api.BrowserContext, handler=handle_response):
     page = await context.new_page()
     # print(f"[INFO] 设置监听器，目标域名: {TARGET_DOMAIN}")
-    page.on("response", handler)
+    if handler != None:
+        page.on("response", handler)
     return page
 
-async def login(page:playwright.async_api.Page, usr, pwd):
+async def login_course(page:playwright.async_api.Page, usr, pwd):
     print(f"INFO: Attempting login for user: {usr}")
     await page.goto("http://oo.buaa.edu.cn")
     await page.locator(".topmost a").click()
@@ -121,6 +139,23 @@ async def login(page:playwright.async_api.Page, usr, pwd):
     await iframe.locator("div.content-con-box:nth-of-type(1) div.item:nth-of-type(7) input").click()
     await page.wait_for_timeout(1000)
     print("INFO: Login form submitted.") # 添加日志
+
+async def login_gitlab(page:playwright.async_api.Page, usr, pwd):
+    print(f"INFO: Attempting login for user: {usr}")
+    await page.goto("http://gitlab.oo.buaa.edu.cn")
+    await page.locator(".gl-button-text").click()
+    try:
+        await page.wait_for_selector("iframe#loginIframe", timeout=2000)
+        iframe = page.frame_locator("iframe#loginIframe")
+        await iframe.locator("div.content-con-box:nth-of-type(1) div.item:nth-of-type(1) input").fill(usr)
+        await page.wait_for_timeout(1000)
+        await iframe.locator("div.content-con-box:nth-of-type(1) div.item:nth-of-type(3) input").fill(pwd)
+        await page.wait_for_timeout(1000)
+        await iframe.locator("div.content-con-box:nth-of-type(1) div.item:nth-of-type(7) input").click()
+        await page.wait_for_timeout(1000)
+        print("INFO: Login form submitted.") # 添加日志
+    except Exception as e:
+        print("[WARN] gitlab has been login")
 
 async def get_page(page:playwright.async_api.Page, url):
     await page.goto(url)
@@ -177,9 +212,11 @@ async def get_courses(context:playwright.async_api.BrowserContext):
         try:
             all_courses = courses[0]['body']['data']['courses']
             course_id = 0
+            year = 0
             for course in all_courses:
                 if re.match(r"^\d+面向对象设计与构造$", course['name']):
                     course_id = course['id']
+                    year = re.findall(r"^(\d+)面向对象设计与构造$", course['name'])[0]
             print(f"[INFO] course_id is {course_id}")
             courses.clear()
             await page.goto(f"{BASE_URL}/course/{course_id}")
@@ -189,17 +226,54 @@ async def get_courses(context:playwright.async_api.BrowserContext):
                 ids = [the_id['id'] for the_id in all_courses]
             print("[INFO] ids is ",end="")
             pprint.pprint(ids)
-            return ids
+            return ids, year
             
         except Exception as e:
             print(f"[ERROR] error when get courses {e}")
 
+commits = []
+lock = asyncio.Lock()
+
+async def get_all_commits(context:playwright.async_api.BrowserContext, year:str, hw: str):
+    url = f"http://gitlab.oo.buaa.edu.cn/oo_homework_{year}/{hw}/-/commits"
+    page = await load_page(context, None)
+    await page.goto(url)
+    _commits = await page.locator("li > div:nth-child(2) > div:nth-child(1) > a").all_inner_texts()
+    links_locator = page.locator("li > div:nth-child(2) > div:nth-child(1) > div:nth-child(3) > time")
+    _times = [await link.get_attribute("title") for link in await links_locator.all()]
+    _all = {_times[i]: _commits[i] for i in range(len(_commits))}
+    # pprint.pprint(_commits)
+    async with lock:
+        true_hw = re.findall(r"oo_homework_\d+_\d+_.*?(\d+)", hw)[0]
+        commits.append(
+            {
+                "hw": true_hw,
+                "commits": _all
+            }
+        )
+    pass
+
+async def get_homeworks(context:playwright.async_api.BrowserContext, year:str):
+    url = f"http://gitlab.oo.buaa.edu.cn/groups/oo_homework_{year}/"    
+    try:
+        await get_page(await load_page(context, handle_homeworks), url)
+        body = homeworks[0]["body"]
+        names = [body[i]["name"] for i in range(len(body))]
+        names = [name for name in names if "exp" not in name]
+        names = [name for name in names if "lab" not in name]
+        names = [name for name in names if "practice" not in name]
+        if len(names) != 12:
+            raise NameError("len(names) > 12!")
+        return names
+    except Exception as e:
+        print(f"[ERROR] error when get hws {e}")
+        pass
 
 async def main(_id, pwd):
     async with async_playwright() as p:
         # 1. 启动浏览器
         browser = await p.chromium.launch(
-            headless=False  # 设置为 False 可以看到浏览器界面，方便调试
+            headless=True  # 设置为 False 可以看到浏览器界面，方便调试
         )
         context = await browser.new_context()
         page = await context.new_page()
@@ -207,35 +281,54 @@ async def main(_id, pwd):
         # 6. 导航到触发 API 请求的页面
         #    注意：这里我用一个示例网站，你需要换成真正会调用 buaa API 的那个页面。
         #    例如，可能是某个课程平台或登录页面。
+        year = 0
         try:
             print("[INFO] 导航到目标页面...")
-            await login(page, _id, pwd)
+            await login_course(page, _id, pwd)
             await page.close()
             # 7. 等待一段时间，确保所有异步请求都已完成
-            course_ids = await get_courses(context)
+            course_ids, year = await get_courses(context)
             # await p.stop()
-            tasks = []
-            index = 1
-            for course_id in course_ids:
-                if index % 4 != 0:
-                    tasks.append(get_all_pages(context, course_id))
-                index += 1
-            await asyncio.gather(*tasks)
-            print("[INFO] 页面加载完成，等待额外1秒以捕获更多动态请求...")
-            await page.wait_for_timeout(1000)
-
+            def split_by_size(data, n):
+                return [data[i:i + n] for i in range(0, len(data), n)]
+            split = 4
+            tasks = [get_all_pages(context, course_ids[i]) for i in range(16) if i%4 !=3]
+            all_tasks = split_by_size(tasks, split)
+            for i in range(split):
+                try:
+                    await asyncio.gather(*(all_tasks[i]))
+                except Exception as e:
+                    print(f"[ERROR] error when get data {e}")
+                
         except Exception as e:
             print(f"[ERROR] 页面导航或操作失败: {e}")
+
+        try:
+            print("[INFO] scrape for gitlab")
+            page = await context.new_page()
+            await login_gitlab(page, _id, pwd)
+            await page.close()
+            # print(year)
+            hws = await get_homeworks(context, year)
+            print(f"[INFO] hws is {hws}")
+            tasks = []
+            for hw in hws:
+                tasks.append(get_all_commits(context, year, hw))
+            await asyncio.gather(*tasks)
+            # pprint.pprint(commits)
+        except Exception as e:
+            print(f"[ERROR] error when orienate to gitlab {e}")
 
         # 8. 关闭浏览器
         print("[INFO] 测试完成，关闭浏览器...")
         await browser.close()
 
         # (可选) 打印所有收集到的数据
-        print("\n--- 所有捕获到的响应摘要 ---")
+        # print("\n--- 所有捕获到的响应摘要 ---")
         import json
         captured_responses.extend(posts)
-        print(json.dumps(captured_responses, indent=2, ensure_ascii=False))
+        captured_responses.extend(commits)
+        # print(json.dumps(captured_responses, indent=2, ensure_ascii=False))
         json.dump(captured_responses, open("tmp.json", "w", encoding="utf-8"), ensure_ascii=False)
 
 

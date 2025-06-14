@@ -2,6 +2,7 @@
 
 import json
 import re
+import dateutil
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -314,14 +315,46 @@ def parse_forum_data(raw_data, config, df):
 
     return df_with_forum
 
-# --- 4. 数据预处理与计算 ---
+def parse_commit_data(raw_data, config):
+    """[新增] 解析 commit 数据，提取每次作业的提交历史。"""
+    commit_history = {}
+    for item in raw_data:
+        # 检查这是否是一条 commit 日志记录
+        if "hw" in item and "commits" in item:
+            try:
+                hw_num = int(item['hw'])
+                commits = item.get('commits', {})
+                
+                commit_list = []
+                for timestamp_str, message in commits.items():
+                    try:
+                        # 使用 dateutil.parser 灵活处理各种时间戳格式
+                        timestamp = dateutil.parser.parse(timestamp_str)
+                        commit_list.append({'timestamp': timestamp, 'message': message})
+                    except (dateutil.parser.ParserError, TypeError):
+                        print(f"警告: 无法解析作业 {hw_num} 的 commit 时间戳: {timestamp_str}")
+                        continue
+
+                # 按时间戳排序
+                if commit_list:
+                    commit_history[hw_num] = sorted(commit_list, key=lambda x: x['timestamp'])
+            except (ValueError, TypeError):
+                 # 忽略格式不正确的 commit 项
+                continue
+                
+    return commit_history
+
+
+# --- 4. 数据预处理与计算 (已加固) ---
 def preprocess_and_calculate_metrics(df):
     """对DataFrame进行预处理，计算所有需要的衍生指标"""
     dt_cols = ['public_test_start_time', 'public_test_end_time', 'public_test_last_submit',
                'mutual_test_start_time', 'mutual_test_end_time']
     for col in dt_cols:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
+            df[col] = pd.to_datetime(df[col], errors='coerce', utc=True)
+            # 转换为 UTC 后，为了与 commit 时间统一，我们移除时区信息
+            df[col] = df[col].dt.tz_localize(None)
 
     # DDL 指数
     durations = (df['public_test_end_time'] - df['public_test_start_time']).dt.total_seconds()
@@ -331,7 +364,32 @@ def preprocess_and_calculate_metrics(df):
     # 攻防指数
     df['offense_defense_ratio'] = (df['hack_success'].fillna(0) + 1) / (df['hacked_success'].fillna(0) + 1)
 
-    # 强测扣分点
+    # --- Start of Hardening Section: 确保所有复合类型的列都得到正确处理 ---
+
+    # 1. 处理期望是字典(dict)的列
+    dict_cols = ['strong_test_issues', 'bug_fix_details', 'commit_keywords']
+    for col in dict_cols:
+        if col in df.columns:
+            # 确保每个元素都是字典，如果不是 (比如是NaN)，则替换为空字典
+            df[col] = df[col].apply(lambda x: x if isinstance(x, dict) else {})
+        else:
+            # 如果列不存在，则创建并填充为空字典，防止后续代码KeyError
+            df[col] = [{} for _ in range(len(df))]
+
+    # 2. 处理期望是列表(list)的列
+    list_cols = ['strong_test_details', 'mutual_test_events', 'room_events', 'commits', 
+                 'essential_post_titles', 'assisted_post_titles', 'uml_detailed_results']
+    for col in list_cols:
+        if col in df.columns:
+            # 确保每个元素都是列表，如果不是 (比如是NaN)，则替换为空列表
+            df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
+        else:
+             # 如果列不存在，则创建并填充为空列表
+            df[col] = [[] for _ in range(len(df))]
+
+    # --- End of Hardening Section ---
+
+    # 强测扣分点 (现在可以安全调用)
     df['strong_test_deduction_count'] = df['strong_test_issues'].apply(
         lambda x: sum(x.values()) if isinstance(x, dict) else 0)
 
@@ -340,15 +398,11 @@ def preprocess_and_calculate_metrics(df):
     df['weighted_defense_deduction'] = df.apply(
         lambda row: row.get('hacked_success', 0) * room_weights.get(row.get('room_level'), 3), axis=1)
 
-    # 确保字典和列表列存在且类型正确
-    df['strong_test_details'] = df['strong_test_details'].apply(lambda x: x if isinstance(x, list) else [])
+    # 填充数值型列
     df['room_member_count'] = df['room_member_count'].fillna(0).astype(int)
-    df['bug_fix_details'] = df['bug_fix_details'].apply(lambda x: x if isinstance(x, dict) else {})
-    df['mutual_test_events'] = df['mutual_test_events'].apply(lambda x: x if isinstance(x, list) else [])
-    df['room_events'] = df['room_events'].apply(lambda x: x if isinstance(x, list) else []) # 新增此行
     df['hacked_total_attempts'] = df['hacked_total_attempts'].fillna(0).astype(int)
 
-    # Bug修复相关指标
+    # Bug修复相关指标 (现在可以安全调用)
     df['bug_fix_hacked_count'] = df['bug_fix_details'].apply(lambda x: x.get('hacked_count', 0))
     df['bug_fix_unfixed_count'] = df['bug_fix_details'].apply(lambda x: x.get('unfixed_count', 0))
     df['bug_fix_hack_score'] = df['bug_fix_details'].apply(lambda x: x.get('hack_score', 0))
@@ -363,8 +417,60 @@ def preprocess_and_calculate_metrics(df):
 
     df['hack_fix_score_ratio'] = (df['bug_fix_hack_score'] + 0.1) / (df['bug_fix_hacked_score'] + 0.1)
 
-    return df
+    # Commit 相关指标 (现在可以安全调用)
+    df['commit_count'] = df['commits'].apply(len)
 
+    # 修复时间戳处理的时区问题
+    df['work_start_time'] = pd.to_datetime(df['commits'].apply(lambda x: x[0]['timestamp'] if x else pd.NaT), utc=True).dt.tz_localize(None)
+    df['work_end_time'] = pd.to_datetime(df['commits'].apply(lambda x: x[-1]['timestamp'] if x else pd.NaT), utc=True).dt.tz_localize(None)
+    
+    df['work_span_hours'] = (df['work_end_time'] - df['work_start_time']).dt.total_seconds() / 3600
+
+    total_public_duration = (df['public_test_end_time'] - df['public_test_start_time']).dt.total_seconds()
+    work_start_offset = (df['work_start_time'] - df['public_test_start_time']).dt.total_seconds()
+    df['start_ratio'] = (work_start_offset / total_public_duration).fillna(1.0).clip(0, 1)
+
+    def calculate_cadence(commits):
+        if len(commits) < 3: return 0
+        timestamps = [c['timestamp'].timestamp() for c in commits]
+        return np.std(timestamps) / 3600
+    df['work_cadence_std_dev'] = df['commits'].apply(calculate_cadence)
+    
+    # 关键词分析 (现在可以安全调用)
+    def analyze_commit_messages(commits):
+        if not commits: return {}
+        version_pattern = re.compile(r'\b(?:v|V)-?(\d+(\.\d+)*)\b')
+        counts = Counter()
+        for commit in commits:
+            msg_lower = commit.get('message', '').lower()
+            if version_pattern.search(commit.get('message', '')):
+                counts['versioning'] += 1
+            if 'fix' in msg_lower or 'bug' in msg_lower or '修复' in msg_lower:
+                counts['fix'] += 1
+            if 'refactor' in msg_lower or 'rebuild' in msg_lower or '重构' in msg_lower:
+                counts['refactor'] += 1
+        return dict(counts)
+    df['commit_keywords'] = df['commits'].apply(analyze_commit_messages)
+    df['commit_refactor_count'] = df['commit_keywords'].apply(lambda x: x.get('refactor', 0))
+
+    def get_development_style_tags(row):
+        tags = []
+        if row['commit_count'] < 3:
+            return tags
+        # 1. 启动与节奏风格 (选择一个最主要的)
+        if row['start_ratio'] < 0.2:
+            tags.append('EARLY_BIRD')
+        elif row['work_cadence_std_dev'] > 12 and row['work_span_hours'] > 24:
+            tags.append('WELL_PACED')
+        else:
+            tags.append('DDL_FIGHTER')
+        # 2. 过程关注点 (可以作为附加标签)
+        if row['commit_refactor_count'] > 0:
+            tags.append('PROCESS_REFACTORING')
+        return tags
+    df['dev_style_tags'] = df.apply(get_development_style_tags, axis=1)
+
+    return df
 
 # --- 5. 可视化模块 ---
 def create_visualizations(df, user_name, config):
@@ -656,6 +762,34 @@ def generate_highlights(df, config):
             ratio = total_hack_score / total_hacked_score
             if 0.9 <= ratio <= 1.1:
                 add_highlight("SCORE_ACTUARY", "于 整个学期")
+    # 编码马拉松选手
+    if not df.empty and df['commit_count'].max() > 20:
+        marathon_hw = df.loc[df['commit_count'].idxmax()]
+        add_highlight("CODING_MARATHONER", f"于 {marathon_hw['name']}", 
+                      hw_name=marathon_hw['name'], count=int(marathon_hw['commit_count']))
+    
+    # 主动重构者
+    if df['commit_refactor_count'].sum() >= 3:
+        add_highlight("PROACTIVE_REFACTORER", "于 整个学期", 
+                      count=int(df['commit_refactor_count'].sum()))
+
+    # 版本管理达人
+    total_version_commits = df['commit_keywords'].apply(lambda x: x.get('versioning', 0)).sum()
+    if total_version_commits >= 5:
+        add_highlight("VERSION_CONTROL_GURU", "于 整个学期", count=int(total_version_commits))
+
+    # 深夜码农
+    night_commits = 0
+    total_commits = 0
+    for commits in df['commits']:
+        if commits:
+            total_commits += len(commits)
+            for commit in commits:
+                # 检查是否在凌晨1点到4点之间
+                if 1 <= commit['timestamp'].hour <= 4:
+                    night_commits += 1
+    if total_commits > 0 and (night_commits / total_commits) > 0.3: # 如果超过30%的commit在深夜
+        add_highlight("NIGHT_OWL_CODER", "于 整个学期", percentage=int((night_commits / total_commits) * 100))
 
     # 逐作业成就检查
     for _, hw in df.iterrows():
@@ -968,6 +1102,45 @@ def _analyze_overall_performance(df):
             hw_names = ", ".join(list(set(sum(perf_issues.values(), []))))
             analysis_texts.append("\n" + random.choice(REPORT_CORPUS["ANALYSIS"]["PERFORMANCE_ISSUE"]).format(hw_names=hw_names, issue_types=issue_types))
             
+    analysis_texts.append("\n" + "开发习惯洞察:") # 添加一个清晰的子标题
+    commit_df = df[df['commit_count'] > 2].copy()
+    
+    if commit_df.empty:
+        analysis_texts.append(random.choice(REPORT_CORPUS["OVERALL_DEV_PROCESS"]["NO_DATA"]))
+    else:
+        # 1. 总体介绍
+        avg_commits = commit_df['commit_count'].mean()
+        total_refactors = int(commit_df['commit_refactor_count'].sum())
+        
+        if total_refactors > 0:
+            # 如果有重构记录，使用 INTRO 语料
+            intro_corpus = REPORT_CORPUS["OVERALL_DEV_PROCESS"]["INTRO"]
+            analysis_texts.append(random.choice(intro_corpus).format(
+                avg_commits=avg_commits,
+                refactor_count=total_refactors
+            ))
+        else:
+            # 如果没有重构记录，使用 INTRO_NO_REFACTOR 语料
+            intro_corpus = REPORT_CORPUS["OVERALL_DEV_PROCESS"]["INTRO_NO_REFACTOR"]
+            analysis_texts.append(random.choice(intro_corpus).format(
+                avg_commits=avg_commits
+            ))
+    
+        # 2. 总体启动风格
+        avg_start_ratio = commit_df['start_ratio'].mean()
+        style_key = ""
+        if avg_start_ratio < 0.3:
+            style_key = "EARLY_BIRD"
+        elif avg_start_ratio > 0.6:
+            style_key = "DDL_FIGHTER"
+        else:
+            style_key = "WELL_PACED"
+
+        # 从新的语料库中选择风格描述
+        if style_key:
+            style_corpus = REPORT_CORPUS["OVERALL_DEV_PROCESS"]["STYLE"][style_key]
+            analysis_texts.append(random.choice(style_corpus))
+
     return analysis_texts
 
 def _analyze_hack_strategy(df):
@@ -1046,6 +1219,45 @@ def _analyze_hack_strategy(df):
             texts.append(REPORT_CORPUS["HACK_STRATEGY"]["EFFECTIVENESS"]["PERSISTENT_EFFORT"])
 
     return texts
+
+# 在 analyze.py 中
+
+def format_development_process_for_hw(hw_row):
+    """[V3.0 重构] 为单次作业格式化开发流程的描述文本，智能复用现有语料库"""
+    tags = hw_row.get('dev_style_tags', [])
+    if not tags:
+        return ""
+    main_style_tag = tags[0]  # 第一个标签作为主要风格
+    additional_tags = tags[1:]
+    # 1. 获取主要工作模式的描述
+    # 复用 SUBMISSION.STYLE 语料库
+    main_desc = ""
+    if main_style_tag in REPORT_CORPUS["SUBMISSION"]["STYLE"]:
+        main_desc = random.choice(REPORT_CORPUS["SUBMISSION"]["STYLE"][main_style_tag])
+    
+    if not main_desc:
+        return "" # 如果没有主要描述，则不生成
+
+    # 2. 获取附加过程的描述
+    additional_descs = []
+    for tag in additional_tags:
+        # 使用新的 HW_DEV_PROCESS 语料库获取补充描述
+        if tag in REPORT_CORPUS.get("HW_DEV_PROCESS", {}):
+            additional_descs.append(random.choice(REPORT_CORPUS["HW_DEV_PROCESS"][tag]))
+
+    # 3. 智能组合描述
+    # 使用连接词语料
+    connectors = REPORT_CORPUS["HW_DEV_PROCESS"]["CONNECTORS"]
+    
+    if additional_descs:
+        # e.g., "本次作业你的开发风格是：[主要风格]。此外，你还对代码进行了重构，追求卓越。"
+        return random.choice(connectors["WITH_ADDITIONS"]).format(
+            main_desc=main_desc,
+            additions="，".join(additional_descs)
+        )
+    else:
+        # e.g., "本次作业你的开发风格是：[主要风格]。"
+        return random.choice(connectors["SINGLE_MAIN"]).format(main_desc=main_desc)
 
 def generate_dynamic_report(df, user_name, config):
     print("\n" + "="*80)
@@ -1188,8 +1400,19 @@ def generate_dynamic_report(df, user_name, config):
 
         if hw['unit'].startswith("第四单元"):
             print(format_uml_analysis(hw))
-
-        print(f"  - 提交: {analyze_submission_style(hw)}")
+        print(format_development_process_for_hw(hw))
+        if pd.notna(hw['ddl_index']):
+            ddl_index = hw['ddl_index']
+            if ddl_index > 0.9:
+                delivery_key = 'FINAL_MOMENT'
+            elif ddl_index < 0.3:
+                delivery_key = 'EARLY_STAGE'
+            else:
+                delivery_key = 'MID_STAGE'
+            
+            # 从语料库中随机选择一条描述
+            delivery_desc = random.choice(REPORT_CORPUS["HW_DELIVERY_STYLE"][delivery_key])
+            print(f"  - 最终交付: {delivery_desc}")
 
     # --- [新功能] 成就墙 (V2.0 新版格式) ---
     print("\n" + "--- 8. 个人成就墙 ---".center(70))
@@ -1250,16 +1473,26 @@ def main():
         with open(file_path, 'r', encoding='utf-8') as f:
             raw_json_data = json.load(f)
 
-        curpos_path = Path("corpus.json")
+        curpos_path = Path("tools", "corpus.json")
         if not curpos_path.exists(): raise FileNotFoundError(f"错误: 未找到数据文件 '{file_path}'。")
         global REPORT_CORPUS
         REPORT_CORPUS = json.load(open(curpos_path, "r", encoding="utf-8"))
 
         find_and_update_user_info(student_id, raw_json_data, CONFIG)
 
-        raw_df = pd.DataFrame(parse_course_data(raw_json_data, CONFIG))
-        df_mertics = preprocess_and_calculate_metrics(raw_df)
-        df = parse_forum_data(raw_json_data, CONFIG, df_mertics) 
+        homework_details = parse_course_data(raw_json_data, CONFIG)
+        if not homework_details:
+            print("\n未找到该学生的有效作业数据，请检查配置文件。")
+            return
+            
+        commit_history = parse_commit_data(raw_json_data, CONFIG)
+        # 2. 将数据合并到主DataFrame中
+        raw_df = pd.DataFrame(homework_details)
+        raw_df['commits'] = raw_df['hw_num'].map(commit_history).fillna('').apply(list) # 映射并填充
+        
+        # 3. 继续后续处理
+        df_metrics = preprocess_and_calculate_metrics(raw_df)
+        df = parse_forum_data(raw_json_data, CONFIG, df_metrics) 
         
         user_display_name = CONFIG["USER_INFO"].get("real_name")
 

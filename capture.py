@@ -10,11 +10,15 @@ import playwright.async_api
 # 定义目标域名
 TARGET_DOMAIN = "api.oo.buaa.edu.cn/homework"
 COURSE = "api.oo.buaa.edu.cn/course"
+POSTS = r"^\w+://api\.oo\.buaa\.edu\.cn/homework/\d+/posts.*?$"
+POST = "api.oo.buaa.edu.cn/post"
 BASE_URL = "http://oo.buaa.edu.cn"
 
 # 创建一个列表来存储捕获到的数据
 captured_responses = []
 courses = []
+post_pages = []
+posts = []
 
 def _append(lists: list, element:any):
     has = False
@@ -67,6 +71,37 @@ async def handle_course(response: Response):
             # 如果解析JSON失败，则作为文本读取
             print(f"  - 无法解析为 JSON，尝试读取文本...")
 
+async def handle_post_pages(response: Response):
+    if re.match(POSTS, response.url):
+        try:
+            json_body = await response.json()
+            post_pages.append({
+                "url": response.url,
+                "status": response.status,
+                "body": json_body,
+            })
+        except Exception as e:
+            print(f"[ERROR] {e}")
+            # 如果解析JSON失败，则作为文本读取
+            print(f"  - 无法解析为 JSON，尝试读取文本...")
+        
+async def handle_posts(response: Response):
+    if POST in response.url:
+        try:
+            json_body = await response.json()
+            # 去除不必要的内容
+            json_body["data"]["post"]["content"] = json_body["data"]["post"]["content"][:100]
+            posts.append({
+                "url": response.url,
+                "status": response.status,
+                "body": json_body,
+            })
+        except Exception as e:
+            print(f"[ERROR] {e}")
+            # 如果解析JSON失败，则作为文本读取
+            print(f"  - 无法解析为 JSON，尝试读取文本...")
+
+
 async def load_page(context:playwright.async_api.BrowserContext, handler=handle_response):
     page = await context.new_page()
     # print(f"[INFO] 设置监听器，目标域名: {TARGET_DOMAIN}")
@@ -92,6 +127,32 @@ async def get_page(page:playwright.async_api.Page, url):
     await page.wait_for_timeout(5000)
     await page.close()
 
+async def get_all_posts(context:playwright.async_api.BrowserContext, course_id:int):
+    pages = f"{BASE_URL}/assignment/{course_id}/discussions"
+    page = await load_page(context, handle_post_pages)
+    await page.goto(pages)
+    await page.wait_for_timeout(1000)
+    try:
+        pprint.pprint(post_pages)
+        index = 1
+        max_pages = post_pages[0]["body"]["data"]["total_page"]
+        ids = []
+        while index <= max_pages:
+            total_cnt = post_pages[index - 1]["body"]["data"]["total_count"]
+            ids.extend([post_pages[index - 1]["body"]["data"]["posts"][i]["id"] for i in range(total_cnt)])
+            index += 1
+        print(f"[INFO] ids is {ids}")
+        await page.close()
+        post = f"{BASE_URL}/assignment/{course_id}/discussion"
+        tasks = []
+        for _id in ids:
+            url = f"{post}/{_id}"
+            tasks.append(get_page(await load_page(context, handle_posts), url))
+        return tasks
+
+    except Exception as e:
+        print(f"[ERROR] error when get posts pages{e}")
+
 async def get_all_pages(context:playwright.async_api.BrowserContext, course_id:int):
     assessment = f"{BASE_URL}/assignment/{course_id}/assessment"
     mutual = f"{BASE_URL}/assignment/{course_id}/mutual"
@@ -99,10 +160,12 @@ async def get_all_pages(context:playwright.async_api.BrowserContext, course_id:i
     task_a = get_page(await load_page(context), assessment)
     task_b = get_page(await load_page(context), mutual)
     task_c = get_page(await load_page(context), bugfix)
+    task_posts = await get_all_posts(context, course_id)
     await asyncio.gather(
         task_a,
         task_b,
-        task_c
+        task_c,
+        *task_posts
     )
 
 async def get_courses(context:playwright.async_api.BrowserContext):
@@ -136,7 +199,7 @@ async def main(_id, pwd):
     async with async_playwright() as p:
         # 1. 启动浏览器
         browser = await p.chromium.launch(
-            headless=True  # 设置为 False 可以看到浏览器界面，方便调试
+            headless=False  # 设置为 False 可以看到浏览器界面，方便调试
         )
         context = await browser.new_context()
         page = await context.new_page()
@@ -171,6 +234,7 @@ async def main(_id, pwd):
         # (可选) 打印所有收集到的数据
         print("\n--- 所有捕获到的响应摘要 ---")
         import json
+        captured_responses.extend(posts)
         print(json.dumps(captured_responses, indent=2, ensure_ascii=False))
         json.dump(captured_responses, open("tmp.json", "w", encoding="utf-8"), ensure_ascii=False)
 

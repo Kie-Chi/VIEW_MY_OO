@@ -168,6 +168,7 @@ def parse_course_data(raw_data, config):
             })
         elif 'ultimate_test/submit' in item['url'] and is_target_user(body_data.get('user', {}), config):
             homework_data[hw_id]['strong_test_score'] = body_data.get('score')
+            homework_data[hw_id]['strong_test_details'] = body_data.get('results', [])
             # [V9.4 新增] 解析代码风格分数
             if 'style' in body_data and 'score' in body_data['style']:
                 homework_data[hw_id]['style_score'] = body_data['style']['score']
@@ -181,6 +182,7 @@ def parse_course_data(raw_data, config):
             homework_data[hw_id]['has_mutual_test'] = True # 确认有互测
             all_members = body_data.get('members', [])
             all_events = body_data.get('events', [])
+            homework_data[hw_id]['room_member_count'] = len(all_members)
             # [V9.0 新增] 存储完整的房间事件，用于上下文分析（如“第一滴血”）
             homework_data[hw_id]['room_events'] = all_events
             room_hacked_counts = [int(m.get('hacked', {}).get('success', 0)) for m in all_members]
@@ -231,6 +233,87 @@ def parse_course_data(raw_data, config):
             processed_homeworks.append(data)
     return sorted(processed_homeworks, key=lambda x: x['hw_num'])
 
+# (替换旧的 parse_forum_data 函数)
+def parse_forum_data(raw_data, config, df):
+    """[V2.0 升级] 解析讨论区数据，识别精华帖、官方答疑互动和同伴互助行为。"""
+    user_name = config["USER_INFO"]["real_name"]
+    # 为每个作业初始化更详细的活动记录
+    forum_activities = {
+        hw_num: {
+            'essential_posts_authored': 0,
+            'essential_post_titles': [],
+            'official_replies': 0,
+            'peer_assists': 0,
+            'assisted_post_titles': []
+        }
+        for hw_num in df['hw_num'].unique()
+    }
+
+    # 识别官方账号（通常是置顶帖的作者）
+    # 这是一个启发式方法，可以通过多个置顶帖来确认
+    official_authors = set()
+    for item in raw_data:
+        if '/post/' in item.get('url', ''):
+            post_data = item.get("body", {}).get("data", {})
+            if post_data.get('post', {}).get('priority') == 'top':
+                official_authors.add(post_data['post'].get('user_name'))
+
+    for item in raw_data:
+        if '/post/' not in item.get('url', ''):
+            continue
+        
+        post_data = item.get("body", {}).get("data", {})
+        post = post_data.get('post')
+        if not post or not post.get('homework'):
+            continue
+            
+        hw_name = post['homework']['name']
+        hw_num = get_hw_number(hw_name, config)
+        if hw_num not in forum_activities:
+            continue
+
+        author = post.get('user_name')
+        priority = post.get('priority')
+        category = post.get('category')
+        title = post.get('title', '某帖子')
+
+        # 1. 检查是否为“社区之光”（精华帖作者）
+        if author == user_name and priority == 'essential':
+            forum_activities[hw_num]['essential_posts_authored'] += 1
+            forum_activities[hw_num]['essential_post_titles'].append(title)
+
+        # 2. 遍历评论，检查“严谨求索者”和“互助典范”
+        comments = post_data.get('comments', [])
+        for comment in comments:
+            if comment.get('user_name') == user_name:
+                # 检查是否为“严谨求索者”（回复官方置顶帖）
+                if priority == 'top' and category == 'issue' and author in official_authors:
+                    forum_activities[hw_num]['official_replies'] += 1
+                
+                # 检查是否为“互助典范”（在同学的求助帖下回复）
+                elif category == 'issue' and author != user_name and author not in official_authors:
+                    forum_activities[hw_num]['peer_assists'] += 1
+                    forum_activities[hw_num]['assisted_post_titles'].append(title)
+
+    # 将活动数据合并到主DataFrame中
+    forum_df_rows = []
+    for hw_num, data in forum_activities.items():
+        data['hw_num'] = hw_num
+        forum_df_rows.append(data)
+    forum_df = pd.DataFrame(forum_df_rows)
+    
+    df_with_forum = pd.merge(df, forum_df, on='hw_num', how='left')
+    
+    # 填充可能出现的 NaN 值并确保类型正确
+    for col in ['essential_posts_authored', 'official_replies', 'peer_assists']:
+         if col in df_with_forum.columns:
+            df_with_forum[col] = df_with_forum[col].fillna(0).astype(int)
+    for col in ['essential_post_titles', 'assisted_post_titles']:
+        if col in df_with_forum.columns:
+            df_with_forum[col] = df_with_forum[col].apply(lambda x: x if isinstance(x, list) else [])
+
+    return df_with_forum
+
 # --- 4. 数据预处理与计算 ---
 def preprocess_and_calculate_metrics(df):
     """对DataFrame进行预处理，计算所有需要的衍生指标"""
@@ -258,6 +341,8 @@ def preprocess_and_calculate_metrics(df):
         lambda row: row.get('hacked_success', 0) * room_weights.get(row.get('room_level'), 3), axis=1)
 
     # 确保字典和列表列存在且类型正确
+    df['strong_test_details'] = df['strong_test_details'].apply(lambda x: x if isinstance(x, list) else [])
+    df['room_member_count'] = df['room_member_count'].fillna(0).astype(int)
     df['bug_fix_details'] = df['bug_fix_details'].apply(lambda x: x if isinstance(x, dict) else {})
     df['mutual_test_events'] = df['mutual_test_events'].apply(lambda x: x if isinstance(x, list) else [])
     df['room_events'] = df['room_events'].apply(lambda x: x if isinstance(x, list) else []) # 新增此行
@@ -419,6 +504,20 @@ def generate_highlights(df, config):
     # earned_achievements 将存储解锁的成就及其详细信息
     # 格式: {'KEY': {'description': '...', 'context': '于 ...'}}
     earned_achievements = {}
+    mutual_df = df[df.get('has_mutual_test', pd.Series(True))].dropna(subset=['hack_success', 'hacked_success', 'room_level'])
+    total_hacks = mutual_df['hack_success'].sum()
+    total_hacked = mutual_df['hacked_success'].sum()
+
+    # 论坛活动统计
+    total_forum_activity = df['essential_posts_authored'].sum() + df['official_replies'].sum() + df['peer_assists'].sum()
+    
+    # 房间等级统计
+    if not mutual_df.empty:
+        room_counts = mutual_df['room_level'].value_counts()
+        total_rooms = len(mutual_df)
+        a_rate = room_counts.get('A', 0) / total_rooms
+        b_rate = room_counts.get('B', 0) / total_rooms
+        c_rate = room_counts.get('C', 0) / total_rooms
 
     def add_highlight(key, context_str, **kwargs):
         """辅助函数，添加成就并记录其描述和上下文。"""
@@ -430,10 +529,46 @@ def generate_highlights(df, config):
             }
 
     strong_scores = df['strong_test_score'].dropna()
-    mutual_df = df[df.get('has_mutual_test', pd.Series(True))].dropna(subset=['hack_success', 'hacked_success'])
     submit_times_df = df.dropna(subset=['public_test_used_times'])
 
     # --- 1. 基础成就检查 (为每个成就添加 context_str) ---
+    # 王座常客
+    if not mutual_df.empty and a_rate > 0.75:
+        add_highlight("A_ROOM_REGULAR", "于 整个学期")
+
+    # 玻璃大炮
+    if total_hacks > 15 and total_hacked > 10:
+        add_highlight("GLASS_CANNON", "于 整个学期")
+
+    # 孤高剑客
+    avg_score = strong_scores.mean() if not strong_scores.empty else 0
+    if total_hacks <= 2 and total_hacked <= 2 and avg_score > 85:
+        add_highlight("LONE_SWORDSMAN", "于 整个学期")
+
+    # 过山车玩家
+    if not mutual_df.empty and total_rooms > 2 and max(a_rate, b_rate, c_rate) < 0.6:
+        add_highlight("ROLLER_COASTER_RIDER", "于 整个学期")
+
+    # 沉默是金
+    if total_forum_activity <= 1:
+        add_highlight("GOLDEN_SILENCE", "于 整个学期")
+    # 社区之光
+    essential_posts_df = df[df['essential_posts_authored'] > 0]
+    if not essential_posts_df.empty:
+        # 获取第一个精华帖的标题用于展示
+        first_essential_title = essential_posts_df.iloc[0]['essential_post_titles'][0]
+        add_highlight("COMMUNITY_PILLAR", f"于《{first_essential_title}》", post_title=first_essential_title)
+
+    # 严谨求索者
+    if df['official_replies'].sum() > 0:
+        add_highlight("RIGOROUS_INQUIRER", "于 整个学期")
+
+    # 互助典范
+    peer_assists_df = df[df['peer_assists'] > 0]
+    if not peer_assists_df.empty:
+        # 获取第一个互助帖的标题用于展示
+        first_assist_title = peer_assists_df.iloc[0]['assisted_post_titles'][0]
+        add_highlight("PEER_MENTOR", f"于《{first_assist_title}》", post_title=first_assist_title)
 
     # [V8.7] 坚实奠基者
     if not strong_scores.empty and strong_scores.mean() < 75 and len(df) > 10:
@@ -524,6 +659,30 @@ def generate_highlights(df, config):
 
     # 逐作业成就检查
     for _, hw in df.iterrows():
+        # 众矢之的
+        room_total_hacked = hw.get('room_total_hacked', 0)
+        member_count = hw.get('room_member_count', 0)
+        if room_total_hacked > 0 and member_count > 1 and (hw.get('hacked_success', 0) / room_total_hacked) > 0.4 and hw.get('hacked_total_attempts', 0) > (member_count / 2):
+            add_highlight("PUBLIC_ENEMY_NO_1", f"于 {hw['name']}", hw_name=hw['name'])
+        
+        # --- 性能相关成就 (仅限第一、二单元) ---
+        if hw['unit'].startswith("第一单元") or hw['unit'].startswith("第二单元"):
+            details = hw.get('strong_test_details', [])
+            if details: # 确保有详细数据
+                scores = [r.get('score', 0) for r in details]
+                if not scores: continue
+
+                # 性能卓越者
+                if all(s > 98 for s in scores):
+                    add_highlight("PERFORMANCE_ACE", f"于 {hw['name']}", hw_name=hw['name'])
+                
+                # 正确性优先
+                if all(85 <= s <= 92 for s in scores):
+                    add_highlight("CORRECTNESS_FIRST", f"于 {hw['name']}", hw_name=hw['name'])
+
+                # 性能赌徒
+                if any(s == 0 for s in scores) and any(s > 98 for s in scores):
+                    add_highlight("PERFORMANCE_GAMBLER", f"于 {hw['name']}", hw_name=hw['name'])
         # [V9.2 新增] 提取当前作业的关键信息
         my_events = hw.get('mutual_test_events', [])
         all_events = hw.get('room_events', [])
@@ -673,7 +832,7 @@ def generate_highlights(df, config):
 
     all_possible_keys = set(REPORT_CORPUS["HIGHLIGHTS"]["TAGS"].keys())
     keys_to_check_for_mastery = all_possible_keys - {"COLLECTION"}
-    if len(all_possible_keys) >= len(keys_to_check_for_mastery) * 0.8:
+    if len(earned_achievements) >= len(keys_to_check_for_mastery) * 0.7:
         add_highlight("COLLECTION", "于 整个学期")
 
     # --- 3. 随机选择5个亮点用于报告主体展示 ---
@@ -968,6 +1127,38 @@ def generate_dynamic_report(df, user_name, config):
         for text in hack_strategy_texts:
             print(text)
 
+    total_essentials = df['essential_posts_authored'].sum()
+    total_official_replies = df['official_replies'].sum()
+    total_peer_assists = df['peer_assists'].sum()
+
+    # 只有当学生有任何一种高质量互动时，才打印本章节
+    if total_essentials > 0 or total_official_replies > 0 or total_peer_assists > 0:
+        print("\n" + "--- [特别洞察] 社区互动与学习风格 ---".center(70))
+        print(random.choice(REPORT_CORPUS["FORUM_ANALYSIS"]["INTRO"]))
+
+        # 分析并打印“社区之光”行为
+        if total_essentials > 0:
+            # 安全地获取第一个精华帖的标题用于展示
+            first_essential_title = df[df['essential_posts_authored'] > 0].iloc[0]['essential_post_titles'][0]
+            print(random.choice(REPORT_CORPUS["FORUM_ANALYSIS"]["COMMUNITY_PILLAR_TEXT"]).format(
+                post_title=first_essential_title
+            ))
+        
+        # 分析并打印“严谨求索者”行为
+        if total_official_replies > 0:
+            print(random.choice(REPORT_CORPUS["FORUM_ANALYSIS"]["RIGOROUS_INQUIRER_TEXT"]).format(
+                count=int(total_official_replies)
+            ))
+        
+        # 分析并打印“互助典范”行为
+        if total_peer_assists > 0:
+            print(random.choice(REPORT_CORPUS["FORUM_ANALYSIS"]["PEER_MENTOR_TEXT"]).format(
+                count=int(total_peer_assists)
+            ))
+    else:
+    #     # 如果上面没有打印任何内容，可以考虑在这里打印"NO_ACTIVITY"
+        print("\n" + "--- [特别洞察] 社区互动与学习风格 ---".center(70))
+        print(random.choice(REPORT_CORPUS["FORUM_ANALYSIS"]["NO_ACTIVITY"]))
     peace_room_text_generated = False
     for _, hw in df.iterrows():
         if hw.get('room_total_hack_success', 99) == 0 and hw.get('room_total_hack_attempts', 0) > 50:
@@ -1067,7 +1258,8 @@ def main():
         find_and_update_user_info(student_id, raw_json_data, CONFIG)
 
         raw_df = pd.DataFrame(parse_course_data(raw_json_data, CONFIG))
-        df = preprocess_and_calculate_metrics(raw_df)
+        df_mertics = preprocess_and_calculate_metrics(raw_df)
+        df = parse_forum_data(raw_json_data, CONFIG, df_mertics) 
         
         user_display_name = CONFIG["USER_INFO"].get("real_name")
 

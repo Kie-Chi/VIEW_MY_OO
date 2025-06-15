@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 import json
+import pprint
 import re
 import dateutil
 import pandas as pd
@@ -319,40 +320,60 @@ def parse_forum_data(raw_data, config, df):
 
     return df_with_forum
 
+import re
+import dateutil.parser
+from datetime import datetime, timezone, timedelta
+
 def parse_commit_data(raw_data, config):
-    """[新增] 解析 commit 数据，提取每次作业的提交历史。"""
     commit_history = {}
+
+    # 正则表达式，用于匹配 "X月 Y, ZZZZ H:MM(上/下)午 GMT+0800" 格式
+    # 兼容 "月 " 和 "月" 两种情况
+    pattern = re.compile(
+        r'(\d+)月\s*(\d+),\s*(\d{4})\s*(\d{1,2}):(\d{2})(下午|上午)\s*GMT\+0800'
+    )
+
     for item in raw_data:
-        # 检查这是否是一条 commit 日志记录
         if "hw" in item and "commits" in item:
             try:
                 hw_num = int(item['hw'])
                 commits = item.get('commits', {})
-                
                 commit_list = []
                 for timestamp_str, message in commits.items():
                     try:
-                        # [修复] 预处理非标准的中英文混合时间戳
-                        processed_ts = timestamp_str.replace('月 ', '/').replace(',', '').replace('下午', 'PM').replace('上午', 'AM')
-                        # "5月 29, 2025 10:04下午 GMT+0800" -> "5/29 2025 10:04PM GMT+0800"
-                        
-                        # 使用 dateutil.parser 灵活处理各种时间戳格式
-                        timestamp = dateutil.parser.parse(processed_ts)
-                        if timestamp.tzinfo is not None:
-                            # 如果有时区，先将其统一转换为 UTC 时区
-                            timestamp = timestamp.astimezone(dateutil.tz.UTC)
+                        match = pattern.match(timestamp_str)
+                        if not match:
+                            # 如果正则不匹配，尝试用旧方法作为备用，并打印警告
+                            # print(f"警告: 作业 {hw_num} 的commit时间戳 '{timestamp_str}' 格式不标准，尝试备用解析...")
+                            processed_ts = timestamp_str.replace('月 ', '/').replace(',', '').replace('下午', 'PM').replace('上午', 'AM')
+                            timestamp_aware = dateutil.parser.parse(processed_ts)
+                        else:
+                            month, day, year, hour, minute, am_pm = match.groups()
+                            hour, minute, day, month, year = map(int, [hour, minute, day, month, year])
                             
-                        timestamp = timestamp.replace(tzinfo=None)
-                        commit_list.append({'timestamp': timestamp, 'message': message})
-                    except (dateutil.parser.ParserError, TypeError):
-                        print(f"警告: 无法解析作业 {hw_num} 的 commit 时间戳: {timestamp_str}")
-                        continue
+                            if am_pm == '下午' and hour != 12:
+                                hour += 12
+                            elif am_pm == '上午' and hour == 12: # 12 AM is 00:00
+                                hour = 0
+                            
+                            # 创建一个带北京时区（GMT+8）的 aware datetime 对象
+                            beijing_tz = timezone(timedelta(hours=8))
+                            timestamp_aware = datetime(year, month, day, hour, minute, tzinfo=beijing_tz)
 
-                # 按时间戳排序
+                        # 统一转换为UTC并移除时区信息，以便比较
+                        timestamp_utc = timestamp_aware.astimezone(timezone.utc)
+                        timestamp_naive_utc = timestamp_utc.replace(tzinfo=None)
+                        
+                        commit_list.append({'timestamp': timestamp_naive_utc, 'message': message})
+
+                    except (dateutil.parser.ParserError, TypeError, ValueError) as e:
+                        # print(f"警告: 最终无法解析作业 {hw_num} 的 commit 时间戳: '{timestamp_str}', 错误: {e}")
+                        continue
+                
                 if commit_list:
                     commit_history[hw_num] = sorted(commit_list, key=lambda x: x['timestamp'])
+
             except (ValueError, TypeError):
-                 # 忽略格式不正确的 commit 项
                 continue
                 
     return commit_history
@@ -391,7 +412,7 @@ def preprocess_and_calculate_metrics(df):
 
     # 2. 处理期望是列表(list)的列
     list_cols = ['strong_test_details', 'mutual_test_events', 'room_events', 'commits', 
-                 'essential_post_titles', 'assisted_post_titles', 'uml_detailed_results']
+                 'uml_detailed_results']
     for col in list_cols:
         if col in df.columns:
             # 确保每个元素都是列表，如果不是 (比如是NaN)，则替换为空列表
@@ -1535,7 +1556,9 @@ def filter_commits_by_homework_timeline(df):
         if col in df.columns:
             # errors='coerce' 会将无法解析的日期变为 NaT (Not a Time)
             # utc=True, tz_localize(None) 是为了和 commit 时间戳的格式保持一致（无时区信息的UTC时间）
-            df[col] = pd.to_datetime(df[col], errors='coerce', utc=True)
+            df[col] = pd.to_datetime(df[col], errors='coerce') \
+            .dt.tz_localize('Asia/Shanghai') \
+            .dt.tz_convert('UTC')
             df[col] = df[col].dt.tz_localize(None)
 
     # 定义一个内部函数，用于处理 DataFrame 的每一行
@@ -1552,6 +1575,7 @@ def filter_commits_by_homework_timeline(df):
             c for c in commits 
             if release_time <= c['timestamp'] <= end_time
         ]
+        # pprint(filtered_commits)
         
         return filtered_commits
     df['commits'] = df.apply(filter_row_commits, axis=1)

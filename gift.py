@@ -115,7 +115,7 @@ def run_analysis(student_id):
     except subprocess.CalledProcessError:
         print(f"❌ 错误: 分析脚本 '{ANALYZE_SCRIPT}' 执行失败。")
     finally:
-        # os.remove(source_data_file)
+        os.remove(source_data_file)
         pass
 
 

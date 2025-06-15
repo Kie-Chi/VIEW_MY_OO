@@ -24,14 +24,12 @@ posts = []
 homeworks = []
 
 def _append(lists: list, element:any):
-    has = False
-    for e in lists:
-        if e['url'] == element['url']:
-            has = True
-            break
-    
-    if not has:
-        lists.append(element)
+    for i, existing_element in enumerate(lists):
+        if existing_element['url'] == element['url']:
+            if existing_element['status'] != 200:
+                lists[i] = element
+            return
+    lists.append(element)
 
 # 2. 定义一个异步的事件处理函数
 async def handle_response(response: Response):
@@ -213,7 +211,7 @@ async def get_courses(context:playwright.async_api.BrowserContext):
     page = await load_page(context, handle_course)
     await page.goto(f"{BASE_URL}/courses")
     await page.wait_for_timeout(2000)
-    pprint.pprint(courses)
+    # pprint.pprint(courses)
     if courses:
         try:
             all_courses = courses[0]['body']['data']['courses']
@@ -289,7 +287,7 @@ async def main(_id, pwd):
     async with async_playwright() as p:
         # 1. 启动浏览器
         browser = await p.chromium.launch(
-            headless=False  # 设置为 False 可以看到浏览器界面，方便调试
+            headless=True  # 设置为 False 可以看到浏览器界面，方便调试
         )
         context = await browser.new_context()
         page = await context.new_page()

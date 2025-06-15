@@ -54,21 +54,37 @@ def run_capture(student_id, password):
         print("检测到已有tmp.json文件，跳过捕获数据阶段")
         return
 
-    # Use sys.executable to ensure we use the same Python interpreter
     command = [sys.executable, CAPTURE_SCRIPT, student_id, password]
     
     try:
-        # We use subprocess.run and capture output to keep the console clean
-        # Use shell=True on Windows if you encounter issues with paths
-        result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
+        result = subprocess.run(command, check=True, capture_output=True)
+        try:
+            # 首先尝试使用 UTF-8 解码
+            stdout_str = result.stdout.decode('utf-8')
+            stderr_str = result.stderr.decode('utf-8')
+        except UnicodeDecodeError:
+            # 如果 UTF-8 解码失败，就回退到 GBK 编码。
+            # 这在中文 Windows 环境下很常见。
+            print("   - 信息: 捕获脚本的输出不是UTF-8编码，正在尝试使用GBK解码...")
+            stdout_str = result.stdout.decode('gbk', errors='replace') # 'replace'可以防止因个别无法解码的字符而报错
+            stderr_str = result.stderr.decode('gbk', errors='replace')
+
         print("✅ 数据捕获成功！")
-        # print(result.stdout) # Uncomment for detailed capture output
+        # 如果需要查看子脚本的详细输出，可以取消下面这行的注释
+        # print(stdout_str)
+
     except subprocess.CalledProcessError as e:
         print("❌ 错误: 数据捕获脚本执行失败。")
         print("   - 请检查您的学号、密码以及网络连接。")
         print("\n--- 捕获脚本输出的错误信息 ---")
-        print(e.stdout)
-        print(e.stderr)
+        try:
+            stdout_err = e.stdout.decode('gbk', errors='replace')
+            stderr_err = e.stderr.decode('gbk', errors='replace')
+            print(stdout_err)
+            print(stderr_err)
+        except Exception:
+            print(e.stdout)
+            print(e.stderr)
         print("---------------------------\n")
         sys.exit(1)
 

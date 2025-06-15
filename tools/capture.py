@@ -319,10 +319,10 @@ async def get_homeworks_urls(id_map: dict):
     return urls
 
 
-async def main(_id, pwd):
+async def main(_id, pwd, mode):
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=True
+            headless=not mode
         )
         context = await browser.new_context()
         page = await context.new_page()
@@ -390,6 +390,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Capture API data from BUAA OO course website.")
     parser.add_argument("student_id", help="Your student ID (e.g., 23371265)")
     parser.add_argument("password", help="Your SSO password (use quotes if it contains special characters)")
+    parser.add_argument("debugmode", help="Use debug mode to detemine headless")
     args = parser.parse_args()
     
-    asyncio.run(main(args.student_id, args.password))
+    asyncio.run(main(args.student_id, args.password, bool(args.debugmode)))

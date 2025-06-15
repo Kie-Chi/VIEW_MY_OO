@@ -1,3 +1,4 @@
 stu_id: 23066666              # 统一认证账号
 stu_pwd: "23066666"           # 统一认证密码
 cleanup: True                 # 脚本运行成功后是否清理tmp.json，但是脚本运行失败时该参数不起作用
+debug: True                   # debug模式将看到capture实时输出，并以非headless启动playwright

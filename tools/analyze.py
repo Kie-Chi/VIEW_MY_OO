@@ -332,8 +332,12 @@ def parse_commit_data(raw_data, config):
                 commit_list = []
                 for timestamp_str, message in commits.items():
                     try:
+                        # [修复] 预处理非标准的中英文混合时间戳
+                        processed_ts = timestamp_str.replace('月 ', '/').replace(',', '').replace('下午', 'PM').replace('上午', 'AM')
+                        # "5月 29, 2025 10:04下午 GMT+0800" -> "5/29 2025 10:04PM GMT+0800"
+                        
                         # 使用 dateutil.parser 灵活处理各种时间戳格式
-                        timestamp = dateutil.parser.parse(timestamp_str)
+                        timestamp = dateutil.parser.parse(processed_ts)
                         if timestamp.tzinfo is not None:
                             # 如果有时区，先将其统一转换为 UTC 时区
                             timestamp = timestamp.astimezone(dateutil.tz.UTC)

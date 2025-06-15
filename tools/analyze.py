@@ -1,62 +1,33 @@
-# analyze.py
 
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import json
 import pprint
 import re
-import dateutil
+import dateutil.parser
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import random
 from collections import Counter
-
-# pygments is not a standard dependency for this script's core logic,
-# but keeping it in imports if it was intended for future use.
-# from pygments import highlight 
+import sys
+import traceback
 import yaml
 
 """
-动态个性化面向对象课程数据分析脚本 V8.7 (Refactored Corpus)
+动态个性化面向对象课程数据分析脚本 V8.7 (Refactored Corpus & Hardened)
 
-功能:
-1.  [V8.7 新增] 全面增强同理心语料库，为成绩不理想或在C房挣扎的同学提供鼓励性、建设性反馈。
-2.  [V8.7 新增] 引入新的学生画像与亮点标签（如“坚实奠基者”），认可学习过程中的毅力与坚持。
-3.  [V8.7 优化] 优化相对表现分析，能区分解读A房、C房和混合房间的不同挑战与收获。
-4.  [V8.6 优化] 优化语料库，对部分语句进行扩写与润色，引入更多变量，报告更具个性化与生动性。
-5.  [V8.5 新增] 新增互测博弈过程分析，洞察Hack时机、目标选择等高级策略。
-6.  [V8.5 新增] 引入基于同房间数据的相对表现分析，新增“风暴幸存者”、“精准打击者”、“战术大师”等情景化标签。
-7.  解析包含课程作业API数据的JSON文件。
-8.  [V8.0 功能] 新增“王者归来”、“漏洞修复专家”等亮点标签，深度挖掘成长与责任感。
-9.  [V8.0 功能] 新增性能瓶颈（RTLE/CTLE）专项分析，尤其关注第二单元并发挑战。
-10. [V8.0 功能] 全面启用并优化语料库，生成关于稳定性、攻防风格的深度文字分析，报告更具洞察力。
-11. [V7.0 功能] 引入学生画像系统 (防御者/攻击者/改进者/DDL战神)，生成高度个性化报告。
-12. [V7.0 功能] 深度挖掘Bug修复数据，分析Bug修复率、攻防得分比，评估开发者责任感。
-13. [V7.0 功能] 详细解析第四单元UML模型检查点，提供针对性反馈。
-14. [V7.0 功能] 整合核心图表为2x2的“综合表现仪表盘”，信息更集中。
-15. 深度分析攻防策略演化、提交行为与代码质量的关联。
-16. 引入基于房间等级的加权防御分，更科学地评估鲁棒性。
-17. 使用大型语料库，生成每次都不同的、充满洞察与个性的分析报告。
-18. 生成多维度、信息丰富的可视化图表。
-
-如何使用:
-1.  将你的JSON数据文件（如 result1.txt 或本例中的 test.json）与此脚本放在同一目录。
-2.  创建一个名为 `config.yml` 的文件，并在其中写入你的学号，格式如下:
-    stu_id: 23371265
-3.  确保已安装所需库: pip install pandas matplotlib numpy pyyaml
-4.  运行脚本: python3 analyze.py
+此版本保留了所有原始分析逻辑，但增强了错误处理能力。
+- 对于关键性错误（如文件丢失、用户未找到），脚本将打印清晰信息并正常退出。
+- 对于非关键性错误（如单个数据点格式错误），脚本将打印警告并继续分析，以生成尽可能完整的报告。
 """
 
 # --- 1. 配置区 ---
 CONFIG = {
-    "FILE_PATH": "tmp.json", # 默认使用您提供的文件名
+    "FILE_PATH": "tmp.json",
     "YAML_CONFIG_PATH": "config.yml",
     "USER_INFO": {
-        "real_name": None,
-        "name": None,
-        "student_id": None,
-        "email": None
+        "real_name": None, "name": None, "student_id": None, "email": None
     },
     "HOMEWORK_NUM_MAP": {
         '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8,
@@ -74,53 +45,57 @@ CONFIG = {
 plt.rcParams['font.sans-serif'] = CONFIG["FONT_FAMILY"]
 plt.rcParams['axes.unicode_minus'] = False
 
-
-# --- 2. 语料库 (Corpus) V8.7 优化版 (Refactored into a single dictionary) ---
+# --- 2. 语料库 ---
 REPORT_CORPUS = {}
 
+# --- [新增] 错误处理函数 ---
+def exit_with_error(message: str):
+    """打印一条致命错误信息到 stderr 并以状态码 1 退出脚本。"""
+    print(f"\n[CRITICAL ERROR] {message}", file=sys.stderr)
+    print("[INFO] Script terminated due to a critical error.", file=sys.stderr)
+    sys.exit(1)
 
-# --- 3. 数据解析与处理 ---
+# --- 3. 数据解析与处理 (已加固) ---
 def find_and_update_user_info(student_id, raw_data, config):
-    """
-    根据学生ID在原始JSON数据中查找姓名和邮箱，并更新CONFIG。
-    """
     user_name = None
     user_email = None
-
-    for item in raw_data:
-        body_data = item.get("body", {}).get("data", {})
-        if not body_data: continue
-        if 'mutual_test/room/self' in item.get('url', ''):
-            for member in body_data.get('members', []):
-                if member.get('student_id') == student_id:
-                    user_name = member.get('real_name')
-                    break
-        if user_name: break
-
-    if user_name:
+    try:
         for item in raw_data:
+            if not isinstance(item, dict): continue
             body_data = item.get("body", {}).get("data", {})
             if not body_data: continue
-            if 'ultimate_test/submit' in item.get('url', ''):
-                user_obj = body_data.get('user', {})
-                if user_obj.get('name') == user_name:
-                    user_email = user_obj.get('email')
-                    break
-    
+            if 'mutual_test/room/self' in item.get('url', ''):
+                for member in body_data.get('members', []):
+                    if member.get('student_id') == student_id:
+                        user_name = member.get('real_name')
+                        break
+            if user_name: break
+
+        if user_name:
+            for item in raw_data:
+                if not isinstance(item, dict): continue
+                body_data = item.get("body", {}).get("data", {})
+                if not body_data: continue
+                if 'ultimate_test/submit' in item.get('url', ''):
+                    user_obj = body_data.get('user', {})
+                    if user_obj.get('name') == user_name:
+                        user_email = user_obj.get('email')
+                        break
+    except Exception as e:
+        exit_with_error(f"An unexpected error occurred while searching for user info: {e}")
+
     if not user_name:
-        raise ValueError(f"错误：在数据文件 {config['FILE_PATH']} 中未找到学号为 {student_id} 的学生信息。")
+        exit_with_error(f"Could not find user with student ID '{student_id}' in the data file '{config['FILE_PATH']}'.")
 
     if not user_email:
         user_email = f"{student_id}@buaa.edu.cn"
-        print(f"警告：未在数据中找到邮箱，已自动生成: {user_email}")
+        print(f"[WARNING] Could not find user email, auto-generating: {user_email}")
 
     config["USER_INFO"].update({
-        "student_id": student_id,
-        "real_name": user_name,
-        "name": user_name,
-        "email": user_email
+        "student_id": student_id, "real_name": user_name,
+        "name": user_name, "email": user_email
     })
-    print(f"成功识别用户: {user_name} ({student_id})")
+    print(f"Successfully identified user: {user_name} ({student_id})")
     return True
 
 def get_hw_number(hw_name, config):
@@ -135,7 +110,6 @@ def get_unit_from_hw_num(hw_num, config):
 
 def is_target_user(data_dict, config):
     if not isinstance(data_dict, dict): return False
-    # [V9.0 新增] 增加对 student_id 的直接检查，因为 event 中可能只有学号
     user_id = str(config["USER_INFO"]["student_id"])
     if 'student_id' in data_dict and str(data_dict['student_id']) == user_id:
         return True
@@ -144,89 +118,91 @@ def is_target_user(data_dict, config):
 def parse_course_data(raw_data, config):
     homework_data = {}
     for item in raw_data:
-        match = re.search(r'/homework/(\d+)', item.get('url', ''))
-        if not match: continue
-        hw_id = match.group(1)
-        if hw_id not in homework_data: homework_data[hw_id] = {'id': hw_id}
-        body_data = item.get("body", {}).get("data", {})
-        if not body_data: continue
-        if 'homework' in body_data: 
-            homework_data[hw_id].update(body_data['homework'])
-            # 确保has_mutual_test字段存在，以便后续分析
-            if 'has_mutual_test' not in homework_data[hw_id]:
-                homework_data[hw_id]['has_mutual_test'] = False
-        if 'public_test' in item['url'] and 'public_test' in body_data:
-            pt_data = body_data['public_test']
-            homework_data[hw_id].update({
-                'public_test_used_times': pt_data.get('used_times'),
-                'public_test_start_time': pt_data.get('start_time'),
-                'public_test_end_time': pt_data.get('end_time'),
-                'public_test_last_submit': pt_data.get('last_submit'),
-            })
-        elif 'mutual_test' in item['url'] and 'room' not in item['url'] and 'data_config' not in item['url'] and 'start_time' in body_data:
-            homework_data[hw_id].update({
-                'mutual_test_start_time': body_data.get('start_time'),
-                'mutual_test_end_time': body_data.get('end_time'),
-                'has_mutual_test': True # 确认有互测
-            })
-        elif 'ultimate_test/submit' in item['url'] and is_target_user(body_data.get('user', {}), config):
-            homework_data[hw_id]['strong_test_score'] = body_data.get('score')
-            homework_data[hw_id]['strong_test_details'] = body_data.get('results', [])
-            # [V9.4 新增] 解析代码风格分数
-            if 'style' in body_data and 'score' in body_data['style']:
-                homework_data[hw_id]['style_score'] = body_data['style']['score']
-            homework_data[hw_id]['strong_test_score'] = body_data.get('score')
-            results = body_data.get('results', [])
-            issue_counter = Counter(p['message'] for p in results if p.get('message') != 'ACCEPTED')
-            homework_data[hw_id]['strong_test_issues'] = dict(issue_counter) if issue_counter else {}
-            if 'uml_results' in body_data and body_data['uml_results']:
-                homework_data[hw_id]['uml_detailed_results'] = body_data['uml_results']
-        elif 'mutual_test/room/self' in item['url']:
-            homework_data[hw_id]['has_mutual_test'] = True # 确认有互测
-            all_members = body_data.get('members', [])
-            all_events = body_data.get('events', [])
-            homework_data[hw_id]['room_member_count'] = len(all_members)
-            # [V9.0 新增] 存储完整的房间事件，用于上下文分析（如“第一滴血”）
-            homework_data[hw_id]['room_events'] = all_events
-            room_hacked_counts = [int(m.get('hacked', {}).get('success', 0)) for m in all_members]
-            if room_hacked_counts:
-                homework_data[hw_id]['room_total_hacked'] = sum(room_hacked_counts)
-                homework_data[hw_id]['room_avg_hacked'] = np.mean(room_hacked_counts)
-            room_hack_success_counts = [int(m.get('hack', {}).get('success', 0)) for m in all_members]
-            room_hack_total_attempts = [int(m.get('hack', {}).get('total', 0)) for m in all_members]
-            homework_data[hw_id]['room_total_hack_success'] = sum(room_hack_success_counts) # 房间成功Hack总次数
-            homework_data[hw_id]['room_total_hack_attempts'] = sum(room_hack_total_attempts) # 房间总攻击次数
+        try:
+            if not isinstance(item, dict): continue
+            url = item.get('url', '')
+            match = re.search(r'/homework/(\d+)', url)
+            if not match: continue
+            hw_id = match.group(1)
+            if hw_id not in homework_data: homework_data[hw_id] = {'id': hw_id}
+            
+            body_data = item.get("body", {}).get("data", {})
+            if not body_data: continue
 
-            for member in all_members:
-                if is_target_user(member, config):
-                    # [V9.0 优化] mutual_test_events 现在直接从 all_events 过滤，代表所有成功的 hack
-                    # 这比之前依赖'your_success'更直接、更准确
-                    my_successful_hack_events = [
-                        e for e in all_events if is_target_user(e.get('hack', {}), config)
-                    ]
-                    successful_targets = sum(1 for m in all_members if int(m.get('hacked', {}).get('your_success', 0)) > 0)
+            if 'homework' in body_data: 
+                homework_data[hw_id].update(body_data['homework'])
+                if 'has_mutual_test' not in homework_data[hw_id]:
+                    homework_data[hw_id]['has_mutual_test'] = False
+            
+            if 'public_test' in url and 'public_test' in body_data:
+                pt_data = body_data['public_test']
+                homework_data[hw_id].update({
+                    'public_test_used_times': pt_data.get('used_times'),
+                    'public_test_start_time': pt_data.get('start_time'),
+                    'public_test_end_time': pt_data.get('end_time'),
+                    'public_test_last_submit': pt_data.get('last_submit'),
+                })
+            elif 'mutual_test' in url and 'room' not in url and 'data_config' not in url and 'start_time' in body_data:
+                homework_data[hw_id].update({
+                    'mutual_test_start_time': body_data.get('start_time'),
+                    'mutual_test_end_time': body_data.get('end_time'),
+                    'has_mutual_test': True
+                })
+            elif 'ultimate_test/submit' in url and is_target_user(body_data.get('user', {}), config):
+                homework_data[hw_id]['strong_test_score'] = body_data.get('score')
+                homework_data[hw_id]['strong_test_details'] = body_data.get('results', [])
+                if 'style' in body_data and 'score' in body_data.get('style', {}):
+                    homework_data[hw_id]['style_score'] = body_data['style']['score']
+                results = body_data.get('results', [])
+                issue_counter = Counter(p['message'] for p in results if p.get('message') != 'ACCEPTED')
+                homework_data[hw_id]['strong_test_issues'] = dict(issue_counter) if issue_counter else {}
+                if 'uml_results' in body_data and body_data['uml_results']:
+                    homework_data[hw_id]['uml_detailed_results'] = body_data['uml_results']
+            elif 'mutual_test/room/self' in url:
+                homework_data[hw_id]['has_mutual_test'] = True
+                all_members = body_data.get('members', [])
+                all_events = body_data.get('events', [])
+                homework_data[hw_id]['room_member_count'] = len(all_members)
+                homework_data[hw_id]['room_events'] = all_events
+                room_hacked_counts = [int(m.get('hacked', {}).get('success', 0)) for m in all_members]
+                if room_hacked_counts:
+                    homework_data[hw_id]['room_total_hacked'] = sum(room_hacked_counts)
+                    homework_data[hw_id]['room_avg_hacked'] = np.mean(room_hacked_counts)
+                room_hack_success_counts = [int(m.get('hack', {}).get('success', 0)) for m in all_members]
+                room_hack_total_attempts = [int(m.get('hack', {}).get('total', 0)) for m in all_members]
+                homework_data[hw_id]['room_total_hack_success'] = sum(room_hack_success_counts)
+                homework_data[hw_id]['room_total_hack_attempts'] = sum(room_hack_total_attempts)
 
-                    homework_data[hw_id].update({
-                        'alias_name': member.get('alias_name_string'),
-                        'hack_success': int(member.get('hack', {}).get('success', 0)),
-                        'hack_total_attempts': int(member.get('hack', {}).get('total', 0)),
-                        'hacked_success': int(member.get('hacked', {}).get('success', 0)),
-                        'hacked_total_attempts': int(member.get('hacked', {}).get('total', 0)),
-                        'room_level': body_data.get('mutual_test', {}).get('level', 'N/A').upper(),
-                        'mutual_test_events': my_successful_hack_events, # 使用新过滤的事件列表
-                        'successful_hack_targets': successful_targets
-                    })
-                    break
-        elif 'bug_fix' in item['url'] and 'personal' in body_data:
-            personal = body_data['personal']
-            hacked_info = personal.get('hacked', {})
-            hack_info = personal.get('hack', {})
-            homework_data[hw_id]['bug_fix_details'] = {
-                'hack_score': hack_info.get('score', 0),
-                'hacked_score': hacked_info.get('score', 0),
-                'hacked_count': hacked_info.get('count', 0),
-                'unfixed_count': hacked_info.get('unfixed', 0)
-            }
+                for member in all_members:
+                    if is_target_user(member, config):
+                        my_successful_hack_events = [e for e in all_events if is_target_user(e.get('hack', {}), config)]
+                        successful_targets = sum(1 for m in all_members if int(m.get('hacked', {}).get('your_success', 0)) > 0)
+                        homework_data[hw_id].update({
+                            'alias_name': member.get('alias_name_string'),
+                            'hack_success': int(member.get('hack', {}).get('success', 0)),
+                            'hack_total_attempts': int(member.get('hack', {}).get('total', 0)),
+                            'hacked_success': int(member.get('hacked', {}).get('success', 0)),
+                            'hacked_total_attempts': int(member.get('hacked', {}).get('total', 0)),
+                            'room_level': body_data.get('mutual_test', {}).get('level', 'N/A').upper(),
+                            'mutual_test_events': my_successful_hack_events,
+                            'successful_hack_targets': successful_targets
+                        })
+                        break
+            elif 'bug_fix' in url and 'personal' in body_data:
+                personal = body_data.get('personal', {})
+                hacked_info = personal.get('hacked', {})
+                hack_info = personal.get('hack', {})
+                homework_data[hw_id]['bug_fix_details'] = {
+                    'hack_score': hack_info.get('score', 0),
+                    'hacked_score': hacked_info.get('score', 0),
+                    'hacked_count': hacked_info.get('count', 0),
+                    'unfixed_count': hacked_info.get('unfixed', 0)
+                }
+        except (KeyError, TypeError, AttributeError) as e:
+            url_info = item.get('url', 'N/A') if isinstance(item, dict) else 'Unknown Item'
+            print(f"[WARNING] Skipping a malformed data item during course data parsing. URL: {url_info}. Error: {e}", file=sys.stderr)
+            continue
+            
     processed_homeworks = []
     for hw_id, data in homework_data.items():
         if 'name' in data:
@@ -236,72 +212,61 @@ def parse_course_data(raw_data, config):
             processed_homeworks.append(data)
     return sorted(processed_homeworks, key=lambda x: x['hw_num'])
 
-# (替换旧的 parse_forum_data 函数)
 def parse_forum_data(raw_data, config, df):
-    """[V2.0 升级] 解析讨论区数据，识别精华帖、官方答疑互动和同伴互助行为。"""
     user_name = config["USER_INFO"]["real_name"]
-    # 为每个作业初始化更详细的活动记录
     forum_activities = {
         hw_num: {
-            'essential_posts_authored': 0,
-            'essential_post_titles': [],
-            'official_replies': 0,
-            'peer_assists': 0,
-            'assisted_post_titles': []
-        }
-        for hw_num in df['hw_num'].unique()
+            'essential_posts_authored': 0, 'essential_post_titles': [],
+            'official_replies': 0, 'peer_assists': 0, 'assisted_post_titles': []
+        } for hw_num in df['hw_num'].unique()
     }
 
-    # 识别官方账号（通常是置顶帖的作者）
-    # 这是一个启发式方法，可以通过多个置顶帖来确认
     official_authors = set()
     for item in raw_data:
-        if '/post/' in item.get('url', ''):
-            post_data = item.get("body", {}).get("data", {})
-            if post_data.get('post', {}).get('priority') == 'top':
-                official_authors.add(post_data['post'].get('user_name'))
+        try:
+            if not isinstance(item, dict): continue
+            if '/post/' in item.get('url', ''):
+                post_data = item.get("body", {}).get("data", {})
+                if post_data.get('post', {}).get('priority') == 'top':
+                    official_authors.add(post_data['post'].get('user_name'))
+        except (AttributeError, TypeError):
+            continue
 
     for item in raw_data:
-        if '/post/' not in item.get('url', ''):
-            continue
-        
-        post_data = item.get("body", {}).get("data", {})
-        post = post_data.get('post')
-        if not post or not post_data.get('homework'):
-            continue
+        try:
+            if not isinstance(item, dict): continue
+            if '/post/' not in item.get('url', ''): continue
             
-        hw_name = post_data['homework']['name']
-        hw_num = get_hw_number(hw_name, config)
-        if hw_num not in forum_activities:
+            post_data = item.get("body", {}).get("data", {})
+            post = post_data.get('post')
+            if not post or not post_data.get('homework'): continue
+            
+            hw_name = post_data['homework']['name']
+            hw_num = get_hw_number(hw_name, config)
+            if hw_num not in forum_activities: continue
+
+            author = post.get('user_name')
+            priority = post.get('priority')
+            category = post.get('category')
+            title = post.get('title', '某帖子')
+
+            if author == user_name and priority == 'essential':
+                forum_activities[hw_num]['essential_posts_authored'] += 1
+                forum_activities[hw_num]['essential_post_titles'].append(title)
+
+            comments = post_data.get('comments', [])
+            for comment in comments:
+                if comment.get('user_name') == user_name:
+                    if priority == 'top' and author in official_authors:
+                        forum_activities[hw_num]['official_replies'] += 1
+                    elif category == 'issue' and author != user_name and author not in official_authors:
+                        forum_activities[hw_num]['peer_assists'] += 1
+                        forum_activities[hw_num]['assisted_post_titles'].append(title)
+        except (AttributeError, TypeError, KeyError) as e:
+            url_info = item.get('url', 'N/A') if isinstance(item, dict) else 'Unknown Item'
+            print(f"[WARNING] Skipping a malformed forum data item. URL: {url_info}. Error: {e}", file=sys.stderr)
             continue
 
-        author = post.get('user_name')
-        priority = post.get('priority')
-        category = post.get('category')
-        title = post.get('title', '某帖子')
-
-        # 1. 检查是否为“社区之光”（精华帖作者）
-        if author == user_name and priority == 'essential':
-            forum_activities[hw_num]['essential_posts_authored'] += 1
-            forum_activities[hw_num]['essential_post_titles'].append(title)
-
-        # 2. 遍历评论，检查“严谨求索者”和“互助典范”
-        comments = post_data.get('comments', [])
-        for comment in comments:
-            if comment.get('user_name') == user_name:
-                # print("yes it has")
-                # import pprint
-                # pprint.pprint(comment)
-                # 只要是回复官方发布的置顶帖，即视为“严谨求索”
-                if priority == 'top' and author in official_authors:
-                    forum_activities[hw_num]['official_replies'] += 1
-                
-                # 检查是否为“互助典范”（在同学的求助帖下回复）
-                elif category == 'issue' and author != user_name and author not in official_authors:
-                    forum_activities[hw_num]['peer_assists'] += 1
-                    forum_activities[hw_num]['assisted_post_titles'].append(title)
-
-    # 将活动数据合并到主DataFrame中
     forum_df_rows = []
     for hw_num, data in forum_activities.items():
         data['hw_num'] = hw_num
@@ -310,7 +275,6 @@ def parse_forum_data(raw_data, config, df):
     
     df_with_forum = pd.merge(df, forum_df, on='hw_num', how='left')
     
-    # 填充可能出现的 NaN 值并确保类型正确
     for col in ['essential_posts_authored', 'official_replies', 'peer_assists']:
          if col in df_with_forum.columns:
             df_with_forum[col] = df_with_forum[col].fillna(0).astype(int)
@@ -320,66 +284,48 @@ def parse_forum_data(raw_data, config, df):
 
     return df_with_forum
 
-import re
-import dateutil.parser
-from datetime import datetime, timezone, timedelta
-
 def parse_commit_data(raw_data, config):
     commit_history = {}
-
-    # 正则表达式，用于匹配 "X月 Y, ZZZZ H:MM(上/下)午 GMT+0800" 格式
-    # 兼容 "月 " 和 "月" 两种情况
-    pattern = re.compile(
-        r'(\d+)月\s*(\d+),\s*(\d{4})\s*(\d{1,2}):(\d{2})(下午|上午)\s*GMT\+0800'
-    )
+    pattern = re.compile(r'(\d+)月\s*(\d+),\s*(\d{4})\s*(\d{1,2}):(\d{2})(下午|上午)\s*GMT\+0800')
 
     for item in raw_data:
-        if "hw" in item and "commits" in item:
-            try:
+        try:
+            if not isinstance(item, dict): continue
+            if "hw" in item and "commits" in item:
                 hw_num = int(item['hw'])
                 commits = item.get('commits', {})
+                if not isinstance(commits, dict): continue
+                
                 commit_list = []
                 for timestamp_str, message in commits.items():
                     try:
                         match = pattern.match(timestamp_str)
                         if not match:
-                            # 如果正则不匹配，尝试用旧方法作为备用，并打印警告
-                            # print(f"警告: 作业 {hw_num} 的commit时间戳 '{timestamp_str}' 格式不标准，尝试备用解析...")
                             processed_ts = timestamp_str.replace('月 ', '/').replace(',', '').replace('下午', 'PM').replace('上午', 'AM')
                             timestamp_aware = dateutil.parser.parse(processed_ts)
                         else:
                             month, day, year, hour, minute, am_pm = match.groups()
                             hour, minute, day, month, year = map(int, [hour, minute, day, month, year])
-                            
-                            if am_pm == '下午' and hour != 12:
-                                hour += 12
-                            elif am_pm == '上午' and hour == 12: # 12 AM is 00:00
-                                hour = 0
-                            
-                            # 创建一个带北京时区（GMT+8）的 aware datetime 对象
+                            if am_pm == '下午' and hour != 12: hour += 12
+                            elif am_pm == '上午' and hour == 12: hour = 0
                             beijing_tz = timezone(timedelta(hours=8))
                             timestamp_aware = datetime(year, month, day, hour, minute, tzinfo=beijing_tz)
-
-                        # 统一转换为UTC并移除时区信息，以便比较
+                        
                         timestamp_utc = timestamp_aware.astimezone(timezone.utc)
                         timestamp_naive_utc = timestamp_utc.replace(tzinfo=None)
-                        
                         commit_list.append({'timestamp': timestamp_naive_utc, 'message': message})
-
                     except (dateutil.parser.ParserError, TypeError, ValueError) as e:
-                        # print(f"警告: 最终无法解析作业 {hw_num} 的 commit 时间戳: '{timestamp_str}', 错误: {e}")
+                        print(f"[WARNING] Could not parse a commit timestamp for HW {hw_num}: '{timestamp_str}'. Skipping. Error: {e}", file=sys.stderr)
                         continue
-                
                 if commit_list:
                     commit_history[hw_num] = sorted(commit_list, key=lambda x: x['timestamp'])
-
-            except (ValueError, TypeError):
-                continue
-                
+        except (ValueError, TypeError) as e:
+            print(f"[WARNING] Skipping a malformed commit data item. Item: {item}. Error: {e}", file=sys.stderr)
+            continue
     return commit_history
 
-
-# --- 4. 数据预处理与计算 (已加固) ---
+# --- 4. 数据预处理与计算 (原逻辑不变) ---
+# 该函数已非常健壮，无需修改
 def preprocess_and_calculate_metrics(df):
     """对DataFrame进行预处理，计算所有需要的衍生指标"""
     dt_cols = ['public_test_start_time', 'public_test_end_time', 'public_test_last_submit',
@@ -387,56 +333,33 @@ def preprocess_and_calculate_metrics(df):
     for col in dt_cols:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce', utc=True)
-            # 转换为 UTC 后，为了与 commit 时间统一，我们移除时区信息
             df[col] = df[col].dt.tz_localize(None)
 
-    # DDL 指数
     durations = (df['public_test_end_time'] - df['public_test_start_time']).dt.total_seconds()
     offsets = (df['public_test_last_submit'] - df['public_test_start_time']).dt.total_seconds()
     df['ddl_index'] = (offsets / durations).fillna(0.5).clip(0, 1)
-
-    # 攻防指数
     df['offense_defense_ratio'] = (df['hack_success'].fillna(0) + 1) / (df['hacked_success'].fillna(0) + 1)
-
-    # --- Start of Hardening Section: 确保所有复合类型的列都得到正确处理 ---
-
-    # 1. 处理期望是字典(dict)的列
     dict_cols = ['strong_test_issues', 'bug_fix_details', 'commit_keywords']
     for col in dict_cols:
         if col in df.columns:
-            # 确保每个元素都是字典，如果不是 (比如是NaN)，则替换为空字典
             df[col] = df[col].apply(lambda x: x if isinstance(x, dict) else {})
         else:
-            # 如果列不存在，则创建并填充为空字典，防止后续代码KeyError
             df[col] = [{} for _ in range(len(df))]
-
-    # 2. 处理期望是列表(list)的列
     list_cols = ['strong_test_details', 'mutual_test_events', 'room_events', 'commits', 
                  'uml_detailed_results']
     for col in list_cols:
         if col in df.columns:
-            # 确保每个元素都是列表，如果不是 (比如是NaN)，则替换为空列表
             df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
         else:
-             # 如果列不存在，则创建并填充为空列表
             df[col] = [[] for _ in range(len(df))]
 
-    # --- End of Hardening Section ---
-
-    # 强测扣分点 (现在可以安全调用)
     df['strong_test_deduction_count'] = df['strong_test_issues'].apply(
         lambda x: sum(x.values()) if isinstance(x, dict) else 0)
-
-    # 加权防御分扣分项
     room_weights = {'A': 10, 'B': 8, 'C': 5}
     df['weighted_defense_deduction'] = df.apply(
         lambda row: row.get('hacked_success', 0) * room_weights.get(row.get('room_level'), 3), axis=1)
-
-    # 填充数值型列
     df['room_member_count'] = df['room_member_count'].fillna(0).astype(int)
     df['hacked_total_attempts'] = df['hacked_total_attempts'].fillna(0).astype(int)
-
-    # Bug修复相关指标 (现在可以安全调用)
     df['bug_fix_hacked_count'] = df['bug_fix_details'].apply(lambda x: x.get('hacked_count', 0))
     df['bug_fix_unfixed_count'] = df['bug_fix_details'].apply(lambda x: x.get('unfixed_count', 0))
     df['bug_fix_hack_score'] = df['bug_fix_details'].apply(lambda x: x.get('hack_score', 0))
@@ -448,18 +371,11 @@ def preprocess_and_calculate_metrics(df):
 
     df['bug_fix_rate'] = df['bug_fix_rate'].fillna(np.nan)
     df['hack_success_rate'] = df['hack_success_rate'].fillna(np.nan)
-
     df['hack_fix_score_ratio'] = (df['bug_fix_hack_score'] + 0.1) / (df['bug_fix_hacked_score'] + 0.1)
-
-    # Commit 相关指标 (现在可以安全调用)
     df['commit_count'] = df['commits'].apply(len)
-
-    # 修复时间戳处理的时区问题
     df['work_start_time'] = pd.to_datetime(df['commits'].apply(lambda x: x[0]['timestamp'] if x else pd.NaT), utc=True).dt.tz_localize(None)
     df['work_end_time'] = pd.to_datetime(df['commits'].apply(lambda x: x[-1]['timestamp'] if x else pd.NaT), utc=True).dt.tz_localize(None)
-    
     df['work_span_hours'] = (df['work_end_time'] - df['work_start_time']).dt.total_seconds() / 3600
-
     total_public_duration = (df['public_test_end_time'] - df['public_test_start_time']).dt.total_seconds()
     work_start_offset = (df['work_start_time'] - df['public_test_start_time']).dt.total_seconds()
     df['start_ratio'] = (work_start_offset / total_public_duration).fillna(1.0).clip(0, 1)
@@ -470,7 +386,6 @@ def preprocess_and_calculate_metrics(df):
         return np.std(timestamps) / 3600
     df['work_cadence_std_dev'] = df['commits'].apply(calculate_cadence)
     
-    # 关键词分析 (现在可以安全调用)
     def analyze_commit_messages(commits):
         if not commits: return {}
         version_pattern = re.compile(r'\b(?:v|V)-?(\d+(\.\d+)*)\b')
@@ -489,33 +404,30 @@ def preprocess_and_calculate_metrics(df):
 
     def get_development_style_tags(row):
         tags = []
-        if row['commit_count'] < 1:
-            return tags
-        # 1. 启动与节奏风格 (选择一个最主要的)
-        if row['start_ratio'] < 0.2:
-            tags.append('EARLY_BIRD')
-        elif row['work_cadence_std_dev'] > 12 and row['work_span_hours'] > 24:
-            tags.append('WELL_PACED')
-        else:
-            tags.append('DDL_FIGHTER')
-        # 2. 过程关注点 (可以作为附加标签)
-        if row['commit_refactor_count'] > 0:
-            tags.append('PROCESS_REFACTORING')
+        if row['commit_count'] < 1: return tags
+        if row['start_ratio'] < 0.2: tags.append('EARLY_BIRD')
+        elif row['work_cadence_std_dev'] > 12 and row['work_span_hours'] > 24: tags.append('WELL_PACED')
+        else: tags.append('DDL_FIGHTER')
+        if row['commit_refactor_count'] > 0: tags.append('PROCESS_REFACTORING')
         return tags
     df['dev_style_tags'] = df.apply(get_development_style_tags, axis=1)
 
     return df
 
-# --- 5. 可视化模块 ---
+# --- 5. 可视化模块 (原逻辑不变) ---
 def create_visualizations(df, user_name, config):
-    """主函数，调用所有可视化生成函数"""
     print("\n正在生成可视化图表，请稍候...")
-    create_performance_dashboard(df, user_name)
-    create_unit_radar_chart(df, user_name, config)
+    try:
+        create_performance_dashboard(df, user_name)
+    except Exception as e:
+        print(f"[WARNING] 生成“综合表现仪表盘”失败，已跳过。错误: {e}", file=sys.stderr)
+    try:
+        create_unit_radar_chart(df, user_name, config)
+    except Exception as e:
+        print(f"[WARNING] 生成“各单元能力雷达图”失败，已跳过。错误: {e}", file=sys.stderr)
     print("所有分析报告与图表已生成完毕！")
 
 def create_performance_dashboard(df, user_name):
-    """生成2x2的综合表现仪表盘"""
     fig, axes = plt.subplots(2, 2, figsize=(20, 14))
     fig.suptitle(f'{user_name} - OO课程综合表现仪表盘 (V8.7)', fontsize=24, weight='bold')
 
@@ -601,7 +513,6 @@ def create_unit_radar_chart(df, user_name, config):
         stats_list = [list(d.values()) for d in valid_units.values()]
         stats_array = np.array(stats_list)
         max_hacked = np.nanmax(stats_array[:, 2])
-        # 反转防守分：被hack越少，分数越高
         if max_hacked > 0: stats_array[:, 2] = max_hacked - stats_array[:, 2] 
         else: stats_array[:, 2] = 1 # 如果从未被hack，给一个最高分
         
@@ -625,7 +536,6 @@ def create_unit_radar_chart(df, user_name, config):
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
         plt.show()
 
-# --- 6. 动态报告生成器 V8.7 ---
 def analyze_submission_style(hw_row):
     start, end, last_submit = hw_row.get('public_test_start_time'), hw_row.get('public_test_end_time'), hw_row.get('public_test_last_submit')
     if pd.isna(start) or pd.isna(end) or pd.isna(last_submit): return random.choice(REPORT_CORPUS["SUBMISSION"]["STYLE"]["UNKNOWN"])
@@ -1584,50 +1494,61 @@ def filter_commits_by_homework_timeline(df):
 # --- 7. 主执行逻辑 ---
 def main():
     try:
-        with open(CONFIG['YAML_CONFIG_PATH'], 'r', encoding='utf-8') as f:
-            yaml_config = yaml.safe_load(f)
-        student_id = str(yaml_config.get('stu_id'))
-        if not student_id or not student_id.isdigit():
-            raise ValueError(f"错误: '{CONFIG['YAML_CONFIG_PATH']}' 中未找到有效的 'stu_id'。")
+        try:
+            with open(CONFIG['YAML_CONFIG_PATH'], 'r', encoding='utf-8') as f:
+                yaml_config = yaml.safe_load(f)
+            student_id = str(yaml_config.get('stu_id'))
+            if not student_id or not student_id.isdigit():
+                raise ValueError("学号无效或缺失")
+        except FileNotFoundError:
+            exit_with_error(f"配置文件 '{CONFIG['YAML_CONFIG_PATH']}' 未找到。请确保它在当前目录。")
+        except (yaml.YAMLError, ValueError) as e:
+            exit_with_error(f"配置文件 '{CONFIG['YAML_CONFIG_PATH']}' 格式错误或内容无效: {e}")
 
-        file_path = Path(CONFIG["FILE_PATH"])
-        if not file_path.exists(): raise FileNotFoundError(f"错误: 未找到数据文件 '{file_path}'。")
-        with open(file_path, 'r', encoding='utf-8') as f:
-            raw_json_data = json.load(f)
+        try:
+            file_path = Path(CONFIG["FILE_PATH"])
+            with open(file_path, 'r', encoding='utf-8') as f:
+                raw_json_data = json.load(f)
+        except FileNotFoundError:
+            exit_with_error(f"数据文件 '{CONFIG['FILE_PATH']}' 未找到。请先运行 capture.py。")
+        except json.JSONDecodeError:
+            exit_with_error(f"数据文件 '{CONFIG['FILE_PATH']}' 不是一个有效的JSON文件，可能已损坏。")
 
-        curpos_path = Path("tools", "corpus.json")
-        if not curpos_path.exists(): raise FileNotFoundError(f"错误: 未找到数据文件 '{file_path}'。")
-        global REPORT_CORPUS
-        REPORT_CORPUS = json.load(open(curpos_path, "r", encoding="utf-8"))
-
+        try:
+            curpos_path = Path("tools", "corpus.json")
+            global REPORT_CORPUS
+            REPORT_CORPUS = json.load(open(curpos_path, "r", encoding="utf-8"))
+        except FileNotFoundError:
+            exit_with_error(f"语料库文件 '{curpos_path}' 未找到。请确保它位于 'tools' 子目录中。")
+        except json.JSONDecodeError:
+            exit_with_error(f"语料库文件 '{curpos_path}' 格式错误。")
         find_and_update_user_info(student_id, raw_json_data, CONFIG)
 
         homework_details = parse_course_data(raw_json_data, CONFIG)
         if not homework_details:
-            print("\n未找到该学生的有效作业数据，请检查配置文件。")
-            return
+            exit_with_error("未找到该学生的任何有效作业数据，无法生成报告。")
             
         commit_history = parse_commit_data(raw_json_data, CONFIG)
-        # 2. 将数据合并到主DataFrame中
         raw_df = pd.DataFrame(homework_details)
-        raw_df['commits'] = raw_df['hw_num'].map(commit_history).fillna('').apply(list) # 映射并填充
+        raw_df['commits'] = raw_df['hw_num'].map(commit_history).fillna('').apply(list)
+        
         df_filtered = filter_commits_by_homework_timeline(raw_df)
-
-        # 3. 继续后续处理
         df_metrics = preprocess_and_calculate_metrics(df_filtered)
         df = parse_forum_data(raw_json_data, CONFIG, df_metrics) 
         
         user_display_name = CONFIG["USER_INFO"].get("real_name")
-
         generate_dynamic_report(df, user_display_name, CONFIG)
         create_visualizations(df, user_display_name, CONFIG)
-
-    except (FileNotFoundError, ValueError) as e:
-        print(e)
+    except SystemExit:
+        pass
     except Exception as e:
-        print(f"\n处理数据时发生未知错误: {e}")
-        import traceback
-        traceback.print_exc()
+        print("\n" + "="*80, file=sys.stderr)
+        print(" AN UNEXPECTED ERROR OCCURRED ".center(80, "#"), file=sys.stderr)
+        print("="*80, file=sys.stderr)
+        print("脚本在处理过程中遇到一个未知错误，这可能是由数据格式问题或代码逻辑缺陷引起的。", file=sys.stderr)
+        print("请检查数据文件是否完整，或将以下错误信息报告给开发者。", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

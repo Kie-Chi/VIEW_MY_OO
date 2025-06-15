@@ -72,8 +72,12 @@ async def handle_response(response: Response):
         except Exception:
             # 对于单个请求的失败，我们只记录错误，不退出
             print(f"  - [WARNING] 无法将响应解析为 JSON: {response.url}")
-            text_body = await response.text()
-            print(f"  - 响应体 (Text): {text_body[:100]}...")
+            try:
+                text_body = await response.text()
+                print(f"  - 响应体 (Text): {text_body[:100]}...")
+            except Exception as e:
+                print("  - [WARNING] 重定向问题（可忽略）或是其他问题")
+                print(      f"{e}")
 
 async def handle_course(response: Response):
     if COURSE in response.url:
@@ -166,9 +170,9 @@ async def login_gitlab(page:playwright.async_api.Page, usr, pwd):
 async def get_page(page:playwright.async_api.Page, url):
     try:
         await page.goto(url)
-        await page.wait_for_load_state("networkidle", timeout=15000)
-        await page.close()
-    except playwright.async_api.TimeoutError as e:
+        await page.wait_for_load_state("networkidle", timeout=10000)
+        await asyncio.wait_for(page.close(), timeout=5)
+    except (playwright.async_api.TimeoutError, asyncio.TimeoutError) as e:
         print("[WARNING] Network error, please wait for a while and try again")
 
 async def get_all_posts(context:playwright.async_api.BrowserContext, course_id:int):

@@ -11,7 +11,7 @@ CONFIG_FILE = "config.yml"
 CAPTURE_SCRIPT = os.path.join("tools", "capture.py")
 ANALYZE_SCRIPT = os.path.join("tools", "analyze.py")
 DATA_FILE = "tmp.json"
-
+CLEANUP = False
 # --- Helper Functions ---
 
 def check_file_exists(filename, is_critical=True):
@@ -77,20 +77,27 @@ def load_config():
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+        # import pprint
+        # pprint.pprint(config)
         student_id = config.get('stu_id')
         password = config.get('stu_pwd')
-
         if not student_id or not password:
             raise ValueError("'stu_id' 或 'stu_pwd' 字段缺失或为空。")
         
+        cleanup = config.get('cleanup')
+        if cleanup == None:            
+            if not isinstance(cleanup, bool):
+                raise ValueError("'cleanup' 类型不是 bool")
+            raise ValueError("'cleanup' 字段错误")
+        global CLEANUP
+        CLEANUP = cleanup
         print(f"   - 学号识别成功: {student_id}")
         return str(student_id), str(password)
 
     except (yaml.YAMLError, ValueError, TypeError) as e:
         print(f"❌ 错误: '{CONFIG_FILE}' 文件格式不正确或内容缺失。")
         print(f"   - 详情: {e}")
-        print(f"   - 请确保文件包含有效的 'stu_id' 和 'stu_pwd'，并且格式正确。")
+        print(f"   - 请确保文件包含有效的配置，并且格式正确。")
         sys.exit(1)
 
 def run_capture(student_id, password):
@@ -117,9 +124,10 @@ def run_analysis():
     run_subprocess_live(command, "步骤 2/2: 报告分析与生成")
 
     try:
-        print(f"\n✨ 正在清理临时数据文件 '{DATA_FILE}'...")
-        os.remove(DATA_FILE)
-        print("   清理完成。")
+        if CLEANUP:
+            print(f"\n✨ 正在清理临时数据文件 '{DATA_FILE}'...")
+            os.remove(DATA_FILE)
+            print("   清理完成。")
     except OSError as e:
         print(f"   [警告] 清理临时文件失败: {e}")
 

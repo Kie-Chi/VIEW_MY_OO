@@ -318,7 +318,7 @@ async def get_homeworks_urls(id_map: dict):
 async def main(_id, pwd):
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False
+            headless=True
         )
         context = await browser.new_context()
         page = await context.new_page()

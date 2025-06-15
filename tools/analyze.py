@@ -696,7 +696,7 @@ def generate_highlights(df, config):
              add_highlight("PERFORMANCE_CHALLENGER", "于 第二单元")
 
     # [V7.0] DDL逆袭者
-    ddl_comeback_df = df[(df['ddl_index'] > 0.9) & (df['strong_test_score'] > 85)]
+    ddl_comeback_df = df[(df['start_ratio'] > 0.8) & (df['strong_test_score'] > 85)] # 使用 start_ratio
     if len(ddl_comeback_df) >= 2:
         add_highlight("DEADLINE_COMEBACK", f"于 {ddl_comeback_df.iloc[0]['name']}", hw_name=ddl_comeback_df.iloc[0]['name'])
 
@@ -707,7 +707,7 @@ def generate_highlights(df, config):
             add_highlight("EFFICIENCY_ACE", f"于 {min_submit_row['name']}", hw_name=min_submit_row['name'])
 
     # 开局冲刺手
-    early_submitters = df[df['ddl_index'] < 0.1]
+    early_submitters = df[df['start_ratio'] < 0.1]
     if len(early_submitters) >= 3:
         add_highlight("FAST_STARTER", f"于 {early_submitters.iloc[0]['name']}", hw_name=early_submitters.iloc[0]['name'])
 
@@ -973,7 +973,7 @@ def identify_student_persona(df):
         return "BALANCED_GENTLE"
 
     mutual_df = df[df.get('has_mutual_test', pd.Series(False))]
-    if df['ddl_index'].dropna().mean() > 0.8: return "SPRINTER"
+    if 'start_ratio' in df.columns and df['start_ratio'].dropna().mean() > 0.7: return "SPRINTER"
     if not mutual_df.empty and mutual_df['hack_success'].sum() > 25: return "HUNTER"
     if (not mutual_df.empty and mutual_df['hacked_success'].sum() <= 3) and df['strong_test_score'].var() < 10: return "FORTRESS"
     if df['public_test_used_times'].dropna().mean() > 6: return "GRINDER"

@@ -58,26 +58,42 @@ def run_subprocess_live(command, description, show_stdout=True):
     else:
         print("   (调试模式已关闭，将隐藏过程日志，请耐心等待...)")
     print("="*50)
-
+    my_env = os.environ.copy()
+    my_env["PYTHONIOENCODING"] = "utf-8"
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=my_env
     )
-    read_and_print_stream_live("标准输出", process.stdout, show_stdout)
-    process.wait()
-    stderr_bytes = process.stderr.read()
-    if stderr_bytes:
-        # 使用与 stdout 相同的“先试utf-8再试gbk”逻辑解码 stderr
-        try:
-            stderr_str = stderr_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            stderr_str = stderr_bytes.decode('gbk', errors='replace')
+
+    output_buffer = []
+
+    try:
+        stdout_reader = io.TextIOWrapper(process.stdout, encoding='utf-8', errors='replace')
+        stderr_reader = io.TextIOWrapper(process.stderr, encoding='gbk', errors='replace')
+
+        while True:
+            line = stdout_reader.readline()
+            if not line:
+                break
+            if show_stdout:
+                print(line.strip())
+            output_buffer.append(line)
         
-        if stderr_str:
+        process.wait()
+        stderr_output = stderr_reader.read()
+        if stderr_output:
             print("\n--- 脚本的错误输出流 ---", file=sys.stderr)
-            print(stderr_str.strip(), file=sys.stderr)
+            print(stderr_output, file=sys.stderr)
             print("------------------------\n", file=sys.stderr)
+            output_buffer.append(stderr_output)
+
+    except Exception as e:
+        print(f"❌ 运行子进程时发生内部错误: {e}")
+        process.kill()
+        sys.exit(1)
+
 
     if process.returncode != 0:
         print(f"❌ 错误: '{description}' 步骤执行失败。")

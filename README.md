@@ -14,8 +14,9 @@
 - ???
 
 前置条件
-- python > 3.10
+- python > 3.10 (自用Python版本3.12.9，不过10以上问题不大)
 - requirements.txt
 
 在config.yml中填入北航统一认证登录的账号和密码，随后运行gift.py等待报告生成
 
+开发时间仓促，如有bug，请提供tmp.json(gift.py中118行注释则不会删除tmp.json)以及报错信息

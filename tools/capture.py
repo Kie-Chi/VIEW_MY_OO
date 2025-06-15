@@ -220,7 +220,7 @@ async def get_courses(context:playwright.async_api.BrowserContext):
             course_id = 0
             year = 0
             for course in all_courses:
-                if re.match(r"^\d+面向对象设计与构造$", course['name']):
+                if re.match(r"^\d+面向对象设计与构造$", course['name']) and course['role'] == '学生':
                     course_id = course['id']
                     year = re.findall(r"^(\d+)面向对象设计与构造$", course['name'])[0]
             print(f"[INFO] course_id is {course_id}")
@@ -240,8 +240,8 @@ async def get_courses(context:playwright.async_api.BrowserContext):
 commits = []
 lock = asyncio.Lock()
 
-async def get_all_commits(context:playwright.async_api.BrowserContext, year:str, hw: str):
-    url = f"http://gitlab.oo.buaa.edu.cn/oo_homework_{year}/{hw}/-/commits"
+async def get_all_commits(context:playwright.async_api.BrowserContext, hw: str):
+    url = f"{hw}commits"
     page = await load_page(context, None)
     await page.goto(url)
     await page.wait_for_load_state("networkidle")
@@ -272,27 +272,24 @@ async def get_all_commits(context:playwright.async_api.BrowserContext, year:str,
         )
     pass
 
-async def get_homeworks(context:playwright.async_api.BrowserContext, year:str):
-    url = f"http://gitlab.oo.buaa.edu.cn/groups/oo_homework_{year}/"    
-    try:
-        await get_page(await load_page(context, handle_homeworks), url)
-        body = homeworks[0]["body"]
-        names = [body[i]["name"] for i in range(len(body))]
-        names = [name for name in names if "exp" not in name]
-        names = [name for name in names if "lab" not in name]
-        names = [name for name in names if "practice" not in name]
-        if len(names) != 12:
-            raise NameError("len(names) > 12!")
-        return names
+async def get_homeworks_urls():
+    try :
+        # pprint.pprint(captured_responses)
+        # for response in captured_responses:
+        #     print(response["url"])
+        ultimate_selfs = [response for response in captured_responses if "ultimate_test/submit" in response["url"]]
+        if len(ultimate_selfs) != 12:
+            raise ValueError(f"we expect 12 homework but {len(ultimate_selfs)} exists")
+        urls = [ultimate_self["body"]["data"]["gitlab_url"] for ultimate_self in ultimate_selfs]
+        return urls
     except Exception as e:
-        print(f"[ERROR] error when get hws {e}")
-        pass
+        print(f"[ERROR] error when get homeworks {e}")
 
 async def main(_id, pwd):
     async with async_playwright() as p:
         # 1. 启动浏览器
         browser = await p.chromium.launch(
-            headless=True  # 设置为 False 可以看到浏览器界面，方便调试
+            headless=False  # 设置为 False 可以看到浏览器界面，方便调试
         )
         context = await browser.new_context()
         page = await context.new_page()
@@ -300,7 +297,6 @@ async def main(_id, pwd):
         # 6. 导航到触发 API 请求的页面
         #    注意：这里我用一个示例网站，你需要换成真正会调用 buaa API 的那个页面。
         #    例如，可能是某个课程平台或登录页面。
-        year = 0
         try:
             print("[INFO] 导航到目标页面...")
             await login_course(page, _id, pwd)
@@ -321,18 +317,22 @@ async def main(_id, pwd):
                 
         except Exception as e:
             print(f"[ERROR] 页面导航或操作失败: {e}")
-        asyncio.sleep(3)
+        await asyncio.sleep(3)
         try:
             print("[INFO] scrape for gitlab")
             page = await context.new_page()
             await login_gitlab(page, _id, pwd)
             await page.close()
             # print(year)
-            hws = await get_homeworks(context, year)
-            print(f"[INFO] hws is {hws}")
+            hw_urls = await get_homeworks_urls()
+            # 保留原始部分内容
+            captrue_regex = r"(.*?/-/).*?"
+            hw_urls = [re.findall(captrue_regex, hw_url)[0] for hw_url in hw_urls]
+            print(f"[INFO] hws is", end="")
+            pprint.pprint(hw_urls)
             tasks = []
-            for hw in hws:
-                tasks.append(get_all_commits(context, year, hw))
+            for hw in hw_urls:
+                tasks.append(get_all_commits(context, hw))
             await asyncio.gather(*tasks)
             # pprint.pprint(commits)
         except Exception as e:

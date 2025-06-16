@@ -71,7 +71,7 @@ def run_subprocess_live(command, description, show_stdout=True):
 
     try:
         stdout_reader = io.TextIOWrapper(process.stdout, encoding='utf-8', errors='replace')
-        stderr_reader = io.TextIOWrapper(process.stderr, encoding='gbk', errors='replace')
+        stderr_reader = io.TextIOWrapper(process.stderr, encoding='utf-8', errors='replace')
 
         while True:
             line = stdout_reader.readline()

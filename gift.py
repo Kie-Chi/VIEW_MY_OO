@@ -1,6 +1,7 @@
 # --- START OF FILE gift.py ---
 
 import os
+import shutil
 import sys
 import subprocess
 import yaml
@@ -8,12 +9,15 @@ from pathlib import Path
 import io
 
 # --- Configuration ---
-CONFIG_FILE = "config.yml"
-CAPTURE_SCRIPT = os.path.join("tools", "capture.py")
+CACHE_DIR = ".cache"
+CONFIG_FILE = "config.yml"        
 ANALYZE_SCRIPT = os.path.join("tools", "analyze.py")
-DATA_FILE = "tmp.json"
+ORIGIN_DATA = os.path.join(CACHE_DIR, "tmp.json")
+PROCESSED_DATA = os.path.join(CACHE_DIR, "tmp.pkl")
+USR_INFO = os.path.join(CACHE_DIR, "user.info")
 CLEANUP = False
 DEBUG_MODE = False
+MODE = "default"
 
 # --- Helper Functions ---
 
@@ -123,14 +127,22 @@ def load_config():
         debug = config.get('debug')
         if debug is None or not isinstance(debug, bool):
             raise ValueError("'debug' 字段缺失或类型不是布尔值 (true/false)。")
+    
+        mode = config.get('mode')
+        if mode is None or not isinstance(mode, str):
+            raise ValueError("'debug' 字段缺失或类型不是str类型")
 
-        global CLEANUP, DEBUG_MODE
+        global CLEANUP, DEBUG_MODE, MODE, CAPTURE_SCRIPT, PROCESS_SCRIPT
         CLEANUP = cleanup
         DEBUG_MODE = debug
+        MODE = mode
+        CAPTURE_SCRIPT = os.path.join("tools", MODE, "capture.py")
+        PROCESS_SCRIPT = os.path.join("tools", MODE, "preprocess.py")
         
         print(f"   - 学号识别成功: {student_id}")
         print(f"   - 清理模式: {'开启' if CLEANUP else '关闭'}")
         print(f"   - 调试模式: {'开启' if DEBUG_MODE else '关闭'}")
+        print(f"   - 数据获取模式: {MODE}")
         return str(student_id), str(password)
 
     except (yaml.YAMLError, ValueError, TypeError) as e:
@@ -141,8 +153,12 @@ def load_config():
 
 def run_capture(student_id, password):
     check_file_exists(CAPTURE_SCRIPT)
-    if Path(DATA_FILE).exists() and not DEBUG_MODE:
-        print(f"✨ 检测到已存在的数据文件 '{DATA_FILE}'。")
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+    except OSError as e:
+        print(f"   [警告] 生成临时文件夹失败: {e}")
+    if Path(ORIGIN_DATA).exists():
+        print(f"✨ 检测到已存在的数据文件 '{ORIGIN_DATA}'。")
         choice = input("   您想跳过数据捕获，直接进行分析吗？(y/n): ").lower()
         if choice == 'y':
             print("   好的，已跳过数据捕割步骤。")
@@ -151,20 +167,26 @@ def run_capture(student_id, password):
             print("   好的，将重新捕获数据...")
 
     command = [sys.executable, CAPTURE_SCRIPT, student_id, password, str(DEBUG_MODE)]
-    run_subprocess_live(command, "步骤 1/2: 数据捕获", show_stdout=DEBUG_MODE)
+    run_subprocess_live(command, "步骤 1/3: 数据捕获", show_stdout=DEBUG_MODE)
+def run_preprocess(student_id):
+    check_file_exists(ORIGIN_DATA)
+    check_file_exists(PROCESS_SCRIPT)
+    command = [sys.executable, PROCESS_SCRIPT, student_id]
+    run_subprocess_live(command, "步骤 2/3: 预处理", show_stdout=DEBUG_MODE)
 
 def run_analysis():
     check_file_exists(ANALYZE_SCRIPT)
-    check_file_exists(DATA_FILE)
+    check_file_exists(PROCESSED_DATA)
+    check_file_exists(USR_INFO)
     check_file_exists(os.path.join("tools", "corpus.json"))
     
     command = [sys.executable, ANALYZE_SCRIPT]
-    run_subprocess_live(command, "步骤 2/2: 报告分析与生成", show_stdout=True)
+    run_subprocess_live(command, "步骤 3/3: 报告分析与生成", show_stdout=True)
 
     try:
         if CLEANUP:
-            print(f"\n✨ 正在清理临时数据文件 '{DATA_FILE}'...")
-            os.remove(DATA_FILE)
+            print(f"\n✨ 正在清理临时数据文件 '{ORIGIN_DATA}'...")
+            shutil.rmtree(CACHE_DIR)
             print("   清理完成。")
     except OSError as e:
         print(f"   [警告] 清理临时文件失败: {e}")
@@ -176,6 +198,7 @@ if __name__ == "__main__":
     
     student_id, password = load_config()
     run_capture(student_id, password)
+    run_preprocess(student_id)
     run_analysis()
     
     print("\n" + "*"*60)

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import pprint
 import re
 import sys  # 引入 sys 模块
@@ -380,7 +381,7 @@ async def main(_id, pwd, mode):
         captured_responses.extend(posts)
         captured_responses.extend(commits)
         
-        output_file = "tmp.json"
+        output_file = os.path.join(".cache", "tmp.json")
         with open(output_file, "w", encoding="utf-8") as f:
             import json
             json.dump(captured_responses, f, ensure_ascii=False, indent=2)

@@ -318,7 +318,7 @@ def main(student_id):
             df = df.drop(columns=['has_self_test'])
             print("[INFO] 'has_self_test' column has been removed.")
         df.to_pickle(os.path.join(".cache", "tmp.pkl"))
-        df.to_csv("tmp.csv")
+        # df.to_csv("tmp.csv")
         json.dump(CONFIG["USER_INFO"], open(os.path.join(".cache", "user.info"), "w", encoding="utf-8"))
     except SystemExit:
         pass

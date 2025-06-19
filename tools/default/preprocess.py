@@ -156,77 +156,61 @@ def parse_course_data(raw_data, config):
         
     return sorted(processed_homeworks, key=get_sort_key)
 
+# 在 preprocess.py 中
+
 def parse_forum_data(raw_data, config, df):
     user_name = config["USER_INFO"]["real_name"]
-    forum_activities = {
-        hw_num: {
-            'essential_posts_authored': 0, 'essential_post_titles': [],
-            'official_replies': 0, 'peer_assists': 0, 'assisted_post_titles': []
-        } for hw_num in df['hw_num'].unique()
-    }
-
-    official_authors = set()
-    for item in raw_data:
-        try:
-            if not isinstance(item, dict): continue
-            if '/post/' in item.get('url', ''):
-                post_data = item.get("body", {}).get("data", {})
-                if post_data.get('post', {}).get('priority') == 'top':
-                    official_authors.add(post_data['post'].get('user_name'))
-        except (AttributeError, TypeError):
-            continue
+    hw_forum_activities = {hw_num: [] for hw_num in df['hw_num'].unique()}
 
     for item in raw_data:
         try:
-            if not isinstance(item, dict): continue
-            if '/post/' not in item.get('url', ''): continue
+            if not isinstance(item, dict) or '/post/' not in item.get('url', ''):
+                continue
             
             post_data = item.get("body", {}).get("data", {})
             post = post_data.get('post')
-            if not post or not post_data.get('homework'): continue
+            if not post or not post_data.get('homework'):
+                continue
             
             hw_name = post_data['homework']['name']
             hw_num = get_hw_number(hw_name, config)
-            if hw_num not in forum_activities: continue
+            if hw_num not in hw_forum_activities:
+                continue
 
-            author = post.get('user_name')
-            priority = post.get('priority')
-            category = post.get('category')
-            title = post.get('title', '某帖子')
+            # 检查发帖行为 (authored)
+            if post.get('user_name') == user_name:
+                activity = {
+                    'type': 'authored',
+                    'title': post.get('title', '无标题'),
+                    'category': post.get('category'), # issue, free_discuss
+                    'priority': post.get('priority')  # top, essential, normal
+                }
+                hw_forum_activities[hw_num].append(activity)
 
-            if author == user_name and priority == 'essential':
-                forum_activities[hw_num]['essential_posts_authored'] += 1
-                forum_activities[hw_num]['essential_post_titles'].append(title)
-
+            # 检查回帖行为 (commented)
+            post_author = post.get('user_name')
+            post_category = post.get('category')
+            post_priority = post.get('priority')
             comments = post_data.get('comments', [])
             for comment in comments:
                 if comment.get('user_name') == user_name:
-                    if priority == 'top' and author in official_authors:
-                        forum_activities[hw_num]['official_replies'] += 1
-                    elif category == 'issue' and author != user_name and author not in official_authors:
-                        forum_activities[hw_num]['peer_assists'] += 1
-                        forum_activities[hw_num]['assisted_post_titles'].append(title)
+                    activity = {
+                        'type': 'commented',
+                        'post_title': post.get('title', '无标题'),
+                        'post_author': post_author,
+                        'post_category': post_category,
+                        'post_priority': post_priority
+                    }
+                    hw_forum_activities[hw_num].append(activity)
+        
         except (AttributeError, TypeError, KeyError) as e:
-            url_info = item.get('url', 'N/A') if isinstance(item, dict) else 'Unknown Item'
-            print(f"[WARNING] Skipping a malformed forum data item. URL: {url_info}. Error: {e}", file=sys.stderr)
-            continue
+            # ... (错误处理) ...
+            exit_with_error(f"遇到某些难以解决的问题: {e}")
 
-    forum_df_rows = []
-    for hw_num, data in forum_activities.items():
-        data['hw_num'] = hw_num
-        forum_df_rows.append(data)
-    forum_df = pd.DataFrame(forum_df_rows)
+    # 将这个原始活动列表作为一个新列添加到 DataFrame
+    df['forum_activities'] = df['hw_num'].map(hw_forum_activities)
     
-    df_with_forum = pd.merge(df, forum_df, on='hw_num', how='left')
-    
-    for col in ['essential_posts_authored', 'official_replies', 'peer_assists']:
-         if col in df_with_forum.columns:
-            df_with_forum[col] = df_with_forum[col].fillna(0).astype(int)
-    for col in ['essential_post_titles', 'assisted_post_titles']:
-        if col in df_with_forum.columns:
-            df_with_forum[col] = df_with_forum[col].apply(lambda x: x if isinstance(x, list) else [])
-
-    return df_with_forum
+    return df
 
 def parse_commit_data(raw_data, config):
     commit_history = {}

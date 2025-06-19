@@ -314,7 +314,11 @@ def main(student_id):
         # print(df_metrics.axes[1])
         # print(df.axes[1])
         # print(set(df.axes[1]).difference(df_metrics.axes[1]))
+        if 'has_self_test' in df.columns:
+            df = df.drop(columns=['has_self_test'])
+            print("[INFO] 'has_self_test' column has been removed.")
         df.to_pickle(os.path.join(".cache", "tmp.pkl"))
+        df.to_csv("tmp.csv")
         json.dump(CONFIG["USER_INFO"], open(os.path.join(".cache", "user.info"), "w", encoding="utf-8"))
     except SystemExit:
         pass

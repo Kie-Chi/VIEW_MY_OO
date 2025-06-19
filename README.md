@@ -25,6 +25,17 @@
 - python > 3.10 (自用Python版本3.12.9，不过10以上问题不大)
 - requirements.txt
 
-在config.yml中填入北航统一认证登录的账号和密码，随后运行gift.py等待报告生成
+快速使用
+- 在`gift.py`同目录下新建`config.yml`，内容可参照`example/config.yml`
+- 
+    ```py
+        pip install -r requirements.txt
+        python gift.py
+    ```
 
-开发时间仓促，如有bug，请提供tmp.json(cleanup: False)以及报错信息
+新增`mode`
+- 在`tools`新建`newmode`,并新增函数`captrue.py, preprocess.py`用于处理数据，最终数据格式满足`interface.md`即可
+
+开发时间仓促，如有bug，请提供.cache/tmp.json(cleanup: False)以及报错信息
+
+

@@ -413,7 +413,7 @@ class Highlighter:
 
             if sorted_events:
                 first_event = sorted_events[0]
-                print(first_event)
+                # print(first_event)
                 if 'hack' in first_event and self.__is_target(first_event.get('hack', {})):
                     self._add_highlight("FIRST_BLOOD", f"于 {hw['name']}", hw_name=hw['name'])
                     return
